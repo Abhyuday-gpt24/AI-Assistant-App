@@ -1,0 +1,79 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  /* Light theme: emerald accent on a faint-mint off-white canvas (no stark #fff,
+     so it's easy on the eyes). Emerald drives interactive surfaces — buttons,
+     user bubble, focus ring, links — while mint accents mark sidebar hover/active.
+     Surface hierarchy (lightest -> darkest): card > background > muted > border. */
+  --background: #f3f8f5; /* faint-mint canvas (softened off pure white) */
+  --foreground: #16211c; /* near-black with a faint green-gray cast */
+  --muted: #e7efe9; /* assistant bubbles, skeletons */
+  --muted-foreground: #5f6b64;
+  --card: #e9f1ec; /* sidebar & chatbox — soft mint rail, not white */
+  --card-foreground: #16211c;
+  --border: #d6e3da;
+  --input: #d6e3da;
+  --primary: #059669; /* emerald — buttons, user bubble, links */
+  --primary-foreground: #ffffff;
+  --accent: #e6f5ee; /* soft mint — hover / active states */
+  --accent-foreground: #065f46; /* dark emerald text on mint */
+  --ring: #059669; /* emerald focus glow */
+}
+
+.dark {
+  /* Dark theme: same emerald accent, brightened for contrast on dark surfaces.
+     Backgrounds carry a faint green cast so the accent feels native. Emerald
+     drives buttons / user bubble / ring / links; a deep-green accent marks
+     sidebar hover/active with a light-mint foreground. */
+  --background: #0a0f0d; /* near-black with faint green cast */
+  --foreground: #e7efe9;
+  --muted: #161d19; /* assistant bubbles, skeletons */
+  --muted-foreground: #8c9a92;
+  --card: #101713; /* sidebar & chatbox */
+  --card-foreground: #e7efe9;
+  --border: #232d27;
+  --input: #232d27;
+  --primary: #10b981; /* brighter emerald — buttons, user bubble, links */
+  --primary-foreground: #04261a; /* deep emerald text on the bright primary */
+  --accent: #14332a; /* deep green — hover / active states */
+  --accent-foreground: #a7f3d0; /* light mint text on the deep-green accent */
+  --ring: #10b981; /* emerald focus glow */
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-ring: var(--ring);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+*,
+*::before,
+*::after {
+  border-color: var(--border);
+}
