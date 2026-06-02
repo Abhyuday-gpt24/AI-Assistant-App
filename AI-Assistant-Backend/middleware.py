@@ -1,4 +1,4 @@
-from fastapi import Request
+from fastapi import Request, HTTPException
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from src.api.services.auth import decode_token
@@ -39,7 +39,19 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 content={"error": "Not authenticated"},
             )
 
-        user_id = decode_token(token)
+        # decode_token RAISES HTTPException on an invalid/expired token. Exception
+        # handlers registered via add_exception_handler do NOT run for exceptions
+        # raised inside BaseHTTPMiddleware (they live in ExceptionMiddleware, mounted
+        # below this), so an uncaught raise here would surface as a 500 — not the
+        # 401 we want (and the frontend's 401→/login bounce would never fire). Catch
+        # it and return the same 401 JSONResponse used for the other auth failures.
+        try:
+            user_id = decode_token(token)
+        except HTTPException:
+            return JSONResponse(
+                status_code=401,
+                content={"error": "Invalid or expired token"},
+            )
         if not user_id:
             return JSONResponse(
                 status_code=401,

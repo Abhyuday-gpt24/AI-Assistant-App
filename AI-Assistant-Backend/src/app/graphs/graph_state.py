@@ -6,6 +6,7 @@ class AgentState(TypedDict):
     query: str
     rewritten_query: str
     intent: list
+    category: str   # query type (math/code/general) → picks the synthesizer model tier
     retrieval_result: str
     web_search_result: str
     input_tokens: int

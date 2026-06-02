@@ -1,4 +1,4 @@
-QUERY_ANALYZER_SYS_PROMPT = """You are the intent router for a general-purpose AI assistant. Classify the user's latest message into one or more intents and produce a search-optimized rewrite of it.
+QUERY_ANALYZER_SYS_PROMPT = """You are the intent router for a general-purpose AI assistant. Classify the user's latest message into one or more intents, choose its category, and produce a search-optimized rewrite of it.
 
 INTENTS:
 - "kb_retrieve" → the answer depends on the user's OWN uploaded documents/files (their personal knowledge base). Choose this whenever the user refers to "my/this/the attached/the uploaded" document, or asks about content that would live in files they provided (e.g. "summarize my report", "what does the contract say about X", "review my resume").
@@ -10,6 +10,16 @@ ROUTING RULES:
 2. "direct" is used ALONE — never combine it with other intents.
 3. "kb_retrieve" and "web_search" MAY be combined when a request needs BOTH the user's documents AND current external info.
 4. When in doubt, and the user is not referencing their files or anything time-sensitive, prefer "direct".
+
+CATEGORY (picks the answering model; INDEPENDENT of intent — a math question can still be "direct", "web_search", etc.):
+- "math" → calculations, equations, proofs, statistics, financial/quantitative reasoning (even when phrased in plain words, e.g. "if I invest 50k at 7% for 20 years…").
+- "code" → programming, debugging, technical implementation, code review.
+- "general" → everything else: chit-chat, explanations, writing, general knowledge, document Q&A.
+
+CATEGORY RULES:
+1. category is ALWAYS exactly one of "math" | "code" | "general".
+2. Judge it in the CONTEXT of the whole conversation, not the latest message alone.
+3. For short or vague follow-ups ("now increase the strength and re-verify", "try with limits 0 to 5", "explain that"), INHERIT the category of the topic being continued — a follow-up to a math thread is still "math".
 
 rewritten_query:
 - A concise, search-optimized rewrite of the request, resolving pronouns/context from the conversation.

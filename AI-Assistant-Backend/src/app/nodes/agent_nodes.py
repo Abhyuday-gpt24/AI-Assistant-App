@@ -1,5 +1,5 @@
 from src.app.graphs.graph_state import AgentState
-from src.app.models.models import gpt_54_nano_model, groq_gpt_model, deepseek_flash_model
+from src.app.models.models import deepseek_flash_model, deepseek_pro_model, gpt_54_mini_model, gpt_54_model, gemini_flash_model
 from src.app.sys_prompts.asistant_sys_prompt import QUERY_ANALYZER_SYS_PROMPT, SYNTHESIZER_AGENT_SYS_PROMPT
 from langchain_core.messages import SystemMessage, HumanMessage
 from pydantic import BaseModel, Field
@@ -10,6 +10,21 @@ from datetime import datetime
 # context (RAG retrieval still covers the wider corpus).
 MAX_DOC_CHARS = 24000
 
+# Category → synthesizer model (primary `.with_fallbacks([...])` secondary, so a
+# provider error on the primary auto-retries on the fallback). Image turns bypass
+# this map entirely (handled structurally below — vision model).
+#   math    : deepseek-v4-pro    → gpt-5.4
+#   code    : deepseek-v4-flash  → deepseek-v4-pro
+#   general : deepseek-v4-flash  (default; also the .get() fallback)
+CATEGORY_MODELS = {
+    "math": deepseek_pro_model.with_fallbacks([gpt_54_model]),
+    "code": deepseek_flash_model.with_fallbacks([deepseek_pro_model]),
+    "general": deepseek_flash_model,
+}
+
+# Image turns: vision-capable primary → gemini-3.5-flash fallback on provider error.
+VISION_MODEL = gpt_54_mini_model.with_fallbacks([gemini_flash_model])
+
 # Define the structure
 class QueryAnalyzerInterface(BaseModel):
     intent: list[Literal["direct", "kb_retrieve", "web_search"]] = Field(
@@ -18,9 +33,21 @@ class QueryAnalyzerInterface(BaseModel):
     rewritten_query: str = Field(
         description="Search-optimized rewrite of user query. For 'direct' intent, keep original as-is."
     )
+    category: Literal["math", "code", "general"] = Field(
+        description='Query TYPE, used to pick the answering model (independent of intent). "math" = calculations/equations/proofs/quantitative reasoning; "code" = programming/debugging/technical implementation; "general" = everything else. For short follow-ups, inherit the prior turn\'s category from the conversation.'
+    )
 
 
-gpt_54_nano_structured_output = gpt_54_nano_model.with_structured_output(QueryAnalyzerInterface, include_raw = True)
+# Analyzer runs every turn and is the critical routing node, so it gets a
+# fallback chain: deepseek-v4-flash → deepseek-v4-pro → gpt-5.4. Each link is the
+# same structured-output runnable, so the {raw, parsed, parsing_error} shape and
+# usage_metadata stay identical no matter which model answers.
+query_analyzer_structured = deepseek_flash_model.with_structured_output(
+    QueryAnalyzerInterface, include_raw=True
+).with_fallbacks([
+    deepseek_pro_model.with_structured_output(QueryAnalyzerInterface, include_raw=True),
+    gpt_54_model.with_structured_output(QueryAnalyzerInterface, include_raw=True),
+])
 
 
 
@@ -34,7 +61,7 @@ async def query_analyzer_node(state: AgentState) -> AgentState:
     system_prompt = QUERY_ANALYZER_SYS_PROMPT
     if summary:
         system_prompt += f"\n\nPrevious conversation summary:\n{summary} \n\n Current date and time : {current_time()}"
-    response = await gpt_54_nano_structured_output.ainvoke([SystemMessage(system_prompt), *state["messages"]])
+    response = await query_analyzer_structured.ainvoke([SystemMessage(system_prompt), *state["messages"]])
 
     result = response["parsed"]
 
@@ -44,6 +71,7 @@ async def query_analyzer_node(state: AgentState) -> AgentState:
     return {
         "intent": result.intent,
         "rewritten_query": result.rewritten_query,
+        "category": result.category,
         "retrieval_result": "",
         "web_search_result": "",
         "input_tokens": token_count
@@ -90,7 +118,20 @@ async def synthesizer_agent_node(state: AgentState) -> AgentState:
             content.append({"type": "image_url", "image_url": {"url": img["data_uri"]}})
         messages = messages[:-1] + [HumanMessage(content=content)]
 
-    response = await deepseek_flash_model.ainvoke([
+    # Model selection is two-layered:
+    #  1. STRUCTURAL (deterministic): image turns must use a vision-capable model.
+    #     DeepSeek/Groq are text-only and 400 on image_url blocks ("unknown
+    #     variant image_url, expected text"); GPT-5.x accepts them natively.
+    #  2. CATEGORY (from the analyzer): math/code → strong DeepSeek Pro reasoner,
+    #     general (and any unknown/missing value) → cheap DeepSeek Flash.
+    # All models stream identically, so the SSE contract is unchanged.
+    if images:
+        model = VISION_MODEL
+    else:
+        category = state.get("category") or "general"
+        model = CATEGORY_MODELS.get(category, deepseek_flash_model)
+
+    response = await model.ainvoke([
         SystemMessage(sys_prompt),
         *messages,
     ])
