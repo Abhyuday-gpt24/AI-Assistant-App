@@ -23,9 +23,26 @@ class TokenResponse(SQLModel):
 
 
 # Chat schemas
+class Attachment(SQLModel):
+    """A file the user attached, already uploaded to S3 via a presigned URL."""
+    original_name: str
+    storage_path: str
+
 class ChatRequest(SQLModel):
     message: str
     chat_id: str | None = None
+    attachments: List[Attachment] = []
+
+
+# Ingestion schemas
+class IngestFile(SQLModel):
+    """One uploaded document to convert + embed into the user's RAG namespace."""
+    storage_path: str
+    original_name: str
+    content_type: str
+
+class IngestRequest(SQLModel):
+    files: List[IngestFile]
 
 class ChatSummary(SQLModel):
     id: str

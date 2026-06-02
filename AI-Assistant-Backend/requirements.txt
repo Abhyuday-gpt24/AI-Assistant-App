@@ -21,3 +21,11 @@ python-jose[cryptography]
 pydantic[email]
 uvicorn
 boto3
+tabulate
+# RAG ingestion / file → markdown conversion (needed wherever /api/ingestion runs)
+pymupdf4llm
+markitdown[docx,pptx,xlsx]
+# NOTE: image-first DOCX/PPTX use the vision path, which renders them via headless
+# LibreOffice — a SYSTEM dependency (not pip). Install `libreoffice` on the
+# ingestion host and ensure `soffice` is on PATH (or set SOFFICE_PATH). Without
+# it, those files gracefully fall back to the markitdown text.

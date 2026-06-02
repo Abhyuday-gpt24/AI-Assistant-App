@@ -1,12 +1,11 @@
 from pathlib import Path
 import time
-from config import settings
 from app.rag_pipeline.data_ingestion.utils.clean_markdown_file import clean_markdown
 from app.rag_pipeline.data_ingestion.utils.chunker import chunk_batchs_in_multiprocess
 from app.rag_pipeline.data_ingestion.utils.store_chunks_in_vs import store_chunks
 from app.rag_pipeline.vector_store import get_vector_store
 import os
-os.environ["OPENAI_API_KEY"] = settings.OPENAI_API_KEY
+
 
 def collect_files(dir_path: str)-> list[str]:
     """Collects all file paths into a list"""
@@ -18,20 +17,24 @@ def collect_files(dir_path: str)-> list[str]:
 
 # Full Pipeline
 def run_pipeline(
-    doc_paths:str, 
-    batch_size:int = 20, 
-    max_workers:int = None, 
+    doc_paths:str,
+    namespace:str,
+    batch_size:int = 20,
+    max_workers:int = None,
 ):
 
     start = time.time()
+
+    if not namespace:
+        raise ValueError("run_pipeline requires a namespace (user_id)")
 
     # Collect
     file_paths = collect_files(doc_paths)
     if not file_paths:
         print("No Files Found!")
         return
-    
-    vector_store = get_vector_store()
+
+    vector_store = get_vector_store(namespace)
 
     # Process in batches
     total_files = len(file_paths)
@@ -68,7 +71,7 @@ def run_pipeline(
  
     # Summary Status
     print(f"\n{'='*50}")
-    print(f"  Project:     {settings.NAMESPACE_METADATA}")
+    print(f"  Namespace:   {namespace}")
     print(f"  Files:       {total_files}")
     print(f"  Chunks:      {total_chunks}")
     print(f"  Time:        {elapsed:.1f}s")
@@ -79,5 +82,5 @@ def run_pipeline(
 # print(dir_path)
 
 # def runpipe():
-#     run_pipeline(doc_paths=dir_path,max_workers=4)
+#     run_pipeline(doc_paths=dir_path, namespace="<user_id>", max_workers=4)
 

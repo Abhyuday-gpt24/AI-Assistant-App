@@ -1,1 +1,14 @@
 .env
+/.claude
+.claude
+.claudeignore
+/AI-Assistant-Backend/.env
+/AI-Assistant-Backend/.claude
+/AI-Assistant-Backend/.claudeignore
+/AI-Assistant-Frontend/.env
+/AI-Assistant-Frontend/.claude
+/AI-Assistant-Frontend/.claudeignore
+**/CLAUDE.md
+**/.env
+**/.claude
+**/.claudeignore

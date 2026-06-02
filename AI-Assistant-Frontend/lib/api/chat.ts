@@ -1,10 +1,14 @@
 import { apiFetch, parseError } from "./client";
+import type { Attachment } from "./uploads";
 
 export type StreamChatBody = {
   message: string;
   // Omitted for a brand-new chat — the backend creates the Chat row inside
   // POST /chat/stream when chat_id is absent. There is no POST /chats route.
   chat_id?: string;
+  // Files already uploaded to S3 (presigned flow). The backend re-verifies
+  // each one exists before streaming. Omitted/empty when nothing is attached.
+  attachments?: Attachment[];
 };
 
 export type StreamChatOptions = {

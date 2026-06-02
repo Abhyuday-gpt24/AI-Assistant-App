@@ -1,15 +1,39 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Chatbox } from "./chatbox";
+import { Chatbox, type AttachedFile } from "./chatbox";
 import { Checkpointer } from "./checkpointer";
-import { MessageIcon, UserIcon } from "@/components/ui/icons";
+import { FileIcon, MessageIcon, UserIcon } from "@/components/ui/icons";
 import { MessageContent } from "./message-content";
 import { cn } from "@/lib/cn";
-import type { ChatMessage } from "./types";
+import type { ChatMessage, MessageAttachment } from "./types";
 import { ApiError } from "@/lib/api/client";
 import { streamChat } from "@/lib/api/chat";
 import { getChats, getMessages, type MessageItem } from "@/lib/api/chats";
+import {
+  ALLOWED_UPLOAD_TYPES,
+  MAX_FILES_PER_MESSAGE,
+  uploadFile,
+  triggerIngestion,
+  getIngestionStatus,
+  type Attachment,
+} from "@/lib/api/uploads";
+
+// Internal, richer shape than the Chatbox's display-only AttachedFile: it keeps
+// the File and the storage_path we get back from S3 so send() can reuse it.
+// ingestStatus tracks the RAG indexing of a *document* after it's uploaded.
+type Upload = {
+  id: string;
+  name: string;
+  file: File;
+  status: "uploading" | "uploaded" | "error";
+  storagePath?: string;
+  category?: "images" | "docs";
+  ingestStatus?: "indexing" | "ready" | "error";
+  error?: string;
+};
+
+const ALLOWED_SET = new Set<string>(ALLOWED_UPLOAD_TYPES);
 
 type ChatWindowProps = {
   title: string;
@@ -39,6 +63,7 @@ export function ChatWindow({
   const [draft, setDraft] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [flashId, setFlashId] = useState<string | null>(null);
+  const [uploads, setUploads] = useState<Upload[]>([]);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const chatIdRef = useRef<string | undefined>(initialChatId);
   const abortRef = useRef<AbortController | null>(null);
@@ -97,12 +122,180 @@ export function ChatWindow({
     }, 1200);
   }, []);
 
+  // Step 2: a file was just attached. Validate it, show it as "uploading", then
+  // presign + PUT it straight to S3 and stash the returned storage_path so Send
+  // can reuse it without re-uploading.
+  const addFiles = useCallback(
+    (files: File[]) => {
+      // Build the new entries first. Validation/count is done here (not inside
+      // the setUploads updater) because React 19 StrictMode invokes state
+      // updaters twice in dev — a presign+upload inside one would fire twice.
+      const entries: Upload[] = [];
+      let count = uploads.length;
+      for (const file of files) {
+        const id = crypto.randomUUID();
+        if (!ALLOWED_SET.has(file.type)) {
+          entries.push({
+            id,
+            name: file.name,
+            file,
+            status: "error",
+            error: `Unsupported file type: ${file.type || "unknown"}`,
+          });
+          continue;
+        }
+        if (count >= MAX_FILES_PER_MESSAGE) {
+          entries.push({
+            id,
+            name: file.name,
+            file,
+            status: "error",
+            error: `Max ${MAX_FILES_PER_MESSAGE} files per message`,
+          });
+          continue;
+        }
+        count++;
+        entries.push({ id, name: file.name, file, status: "uploading" });
+      }
+
+      setUploads((prev) => [...prev, ...entries]);
+
+      // Fire the uploads OUTSIDE the updater so they run exactly once. The
+      // reconciling setUploads calls below are pure (idempotent maps), so a
+      // StrictMode double-invoke of them is harmless.
+      for (const entry of entries) {
+        if (entry.status !== "uploading") continue;
+        uploadFile(entry.file)
+          .then((uploaded) => {
+            const isDoc = uploaded.category === "docs";
+            setUploads((cur) =>
+              cur.map((u) =>
+                u.id === entry.id
+                  ? {
+                      ...u,
+                      status: "uploaded",
+                      storagePath: uploaded.storagePath,
+                      category: uploaded.category,
+                      // Docs begin indexing immediately; the poll effect below
+                      // flips this to "ready"/"error".
+                      ingestStatus: isDoc ? "indexing" : undefined,
+                    }
+                  : u,
+              ),
+            );
+            // Step 5 trigger: documents get converted + embedded into this
+            // user's RAG namespace now that they're in S3. Images are skipped
+            // (they're sent to the model inline at send time).
+            if (isDoc) {
+              triggerIngestion([
+                {
+                  storage_path: uploaded.storagePath,
+                  original_name: entry.name,
+                  content_type: uploaded.contentType,
+                },
+              ]).catch(() => {
+                // Couldn't even enqueue → mark errored so the chip isn't stuck.
+                setUploads((cur) =>
+                  cur.map((u) =>
+                    u.id === entry.id ? { ...u, ingestStatus: "error" } : u,
+                  ),
+                );
+              });
+            }
+          })
+          .catch((err: unknown) => {
+            const message =
+              err instanceof Error ? err.message : "Upload failed";
+            setUploads((cur) =>
+              cur.map((u) =>
+                u.id === entry.id ? { ...u, status: "error", error: message } : u,
+              ),
+            );
+          });
+      }
+    },
+    [uploads],
+  );
+
+  const removeAttachment = useCallback((id: string) => {
+    setUploads((prev) => prev.filter((u) => u.id !== id));
+  }, []);
+
+  // Poll ingestion status while any document is still "indexing". The key is a
+  // stable join of the indexing paths, so the loop restarts when that set
+  // changes (a doc turning ready/error drops out and the loop shrinks).
+  const indexingKey = uploads
+    .filter((u) => u.ingestStatus === "indexing" && u.storagePath)
+    .map((u) => u.storagePath as string)
+    .sort()
+    .join("|");
+
+  useEffect(() => {
+    if (!indexingKey) return;
+    const paths = indexingKey.split("|");
+    let cancelled = false;
+    let timer: number | undefined;
+
+    const tick = async () => {
+      try {
+        const statuses = await getIngestionStatus(paths);
+        if (cancelled) return;
+        setUploads((cur) =>
+          cur.map((u) => {
+            if (u.ingestStatus !== "indexing" || !u.storagePath) return u;
+            const s = statuses.find((x) => x.storage_path === u.storagePath);
+            if (!s) return u;
+            if (s.status === "ready") return { ...u, ingestStatus: "ready" };
+            if (s.status === "error")
+              return { ...u, ingestStatus: "error", error: s.error ?? "Indexing failed" };
+            return u; // pending/processing → keep polling
+          }),
+        );
+      } catch {
+        // transient network/error — keep polling
+      }
+      if (!cancelled) timer = window.setTimeout(tick, 2500);
+    };
+
+    timer = window.setTimeout(tick, 1500);
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [indexingKey]);
+
+  // Display-only projection handed to the Chatbox.
+  const attachedFiles: AttachedFile[] = uploads.map((u) => ({
+    id: u.id,
+    name: u.name,
+    status: u.status,
+    ingestStatus: u.ingestStatus,
+    error: u.error,
+  }));
+
   async function send() {
     const text = draft.trim();
-    if (!text || streaming) return;
+
+    // Only files that finished uploading carry a storage_path we can send.
+    const ready = uploads.filter(
+      (u) => u.status === "uploaded" && u.storagePath,
+    );
+    const attachments: Attachment[] = ready.map((u) => ({
+      original_name: u.name,
+      storage_path: u.storagePath as string,
+    }));
+    const bubbleAttachments: MessageAttachment[] = ready.map((u) => ({
+      name: u.name,
+      storagePath: u.storagePath as string,
+    }));
+
+    if ((!text && attachments.length === 0) || streaming) return;
+    // Don't send while an upload is still in flight (no storage_path yet).
+    if (uploads.some((u) => u.status === "uploading")) return;
 
     setStreaming(true);
     setDraft("");
+    setUploads([]);
 
     // No chat_id => this is a new chat. The backend has no POST /chats route;
     // it creates the Chat row implicitly inside POST /chat/stream. We recover
@@ -128,6 +321,7 @@ export function ChatWindow({
       role: "user",
       content: text,
       createdAt: new Date(now).toISOString(),
+      attachments: bubbleAttachments.length > 0 ? bubbleAttachments : undefined,
     };
     const assistantId = `a-${now + 1}`;
     const assistantMessage: ChatMessage = {
@@ -143,7 +337,11 @@ export function ChatWindow({
 
     try {
       await streamChat(
-        { message: text, chat_id: chatId },
+        {
+          message: text,
+          chat_id: chatId,
+          attachments: attachments.length > 0 ? attachments : undefined,
+        },
         {
           signal: controller.signal,
           onChatId: applyChatId,
@@ -254,6 +452,9 @@ export function ChatWindow({
           onChange={setDraft}
           onSubmit={send}
           disabled={streaming || loadingHistory}
+          attachments={attachedFiles}
+          onAddFiles={addFiles}
+          onRemoveAttachment={removeAttachment}
         />
       </div>
     </div>
@@ -304,7 +505,26 @@ function MessageBubble({
         {streaming ? (
           <TypingDots />
         ) : isUser ? (
-          <span className="whitespace-pre-wrap">{message.content}</span>
+          <div className="space-y-2">
+            {message.attachments && message.attachments.length > 0 && (
+              <ul className="flex flex-wrap gap-1.5">
+                {message.attachments.map((att) => (
+                  <li
+                    key={att.storagePath}
+                    className="flex max-w-[200px] items-center gap-1.5 rounded-lg bg-[var(--primary-foreground)]/15 px-2 py-1 text-xs"
+                  >
+                    <FileIcon className="h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate" title={att.name}>
+                      {att.name}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {message.content && (
+              <span className="block whitespace-pre-wrap">{message.content}</span>
+            )}
+          </div>
         ) : (
           <MessageContent content={message.content} />
         )}

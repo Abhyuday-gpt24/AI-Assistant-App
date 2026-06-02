@@ -1,3 +1,4 @@
+import os
 from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
@@ -27,7 +28,6 @@ class Settings(BaseSettings):
 
     # Vector Store Pinecone settings
     PINECONE_INDEX_NAME: str
-    NAMESPACE_METADATA: str
     PINECONE_API_KEY: str
 
 
@@ -45,3 +45,17 @@ class Settings(BaseSettings):
         env_file = ".env"
 
 settings = Settings()
+
+
+# LangChain/LangSmith read tracing config from OS ENV VARS at runtime — NOT from
+# this pydantic Settings object. pydantic-settings reads .env into `settings` but
+# does not export to os.environ, and nothing calls load_dotenv(), so without this
+# tracing silently stays off. config.py is imported before any model/graph init,
+# so setting them here takes effect for every LangChain/LangGraph run.
+os.environ["LANGSMITH_TRACING"] = str(settings.LANGSMITH_TRACING).lower()
+os.environ["LANGSMITH_ENDPOINT"] = settings.LANGSMITH_ENDPOINT
+os.environ["LANGSMITH_API_KEY"] = settings.LANGSMITH_API_KEY
+os.environ["LANGSMITH_PROJECT"] = settings.LANGSMITH_PROJECT
+# Legacy aliases some LangChain versions still consult:
+os.environ["LANGCHAIN_TRACING_V2"] = str(settings.LANGSMITH_TRACING).lower()
+os.environ["LANGCHAIN_API_KEY"] = settings.LANGCHAIN_API_KEY or settings.LANGSMITH_API_KEY

@@ -34,7 +34,7 @@ async def load_search_tool():
 async def web_search(state: AgentState) -> AgentState:
     await load_search_tool()
     
-    query = state.get("reframed_query") or state["query"]
+    query = state.get("rewritten_query") or state["query"]
     
     result = await web_search_tavily_tool.ainvoke({"query": query})
 

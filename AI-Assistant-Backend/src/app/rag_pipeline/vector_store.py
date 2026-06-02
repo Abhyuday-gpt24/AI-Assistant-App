@@ -9,9 +9,13 @@ retrievers = {}
 index_initialized = False
 
 
-def get_vector_store():
+def get_vector_store(namespace: str):
+    """Vector store scoped to a namespace (the user_id). RAG is fully per-user —
+    there is no shared/global knowledge base, so a namespace is required."""
+    if not namespace:
+        raise ValueError("get_vector_store requires a namespace (user_id)")
     global index_initialized
-    collection = settings.NAMESPACE_METADATA
+    collection = namespace
     if collection in vector_stores:
         return vector_stores[collection]
 
@@ -30,23 +34,27 @@ def get_vector_store():
             )
         index_initialized = True
 
-    embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+    embeddings = OpenAIEmbeddings(model="text-embedding-3-small", api_key=settings.OPENAI_API_KEY)
 
     store = PineconeVectorStore(
         index_name=pinecone_index_name,
         embedding=embeddings,
         namespace=collection,
+        pinecone_api_key=settings.PINECONE_API_KEY,
     )
     vector_stores[collection] = store
     return store
 
 
-def get_retriever(k=4):
-    collection = settings.NAMESPACE_METADATA
+def get_retriever(namespace: str, k=4):
+    """Retriever scoped to a namespace (the user_id). Per-user only."""
+    if not namespace:
+        raise ValueError("get_retriever requires a namespace (user_id)")
+    collection = namespace
     if collection in retrievers:
         return retrievers[collection]
 
-    retriever = get_vector_store().as_retriever(
+    retriever = get_vector_store(namespace).as_retriever(
         search_type="mmr",
         search_kwargs={"k": k, "fetch_k": 25, "lambda_mult": 0.85},
     )

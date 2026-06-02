@@ -63,3 +63,28 @@ class Message(SQLModel, table=True):
     )
 
     chat: Chat | None = Relationship(back_populates="messages")
+
+
+class IngestionJob(SQLModel, table=True):
+    """Tracks RAG ingestion of one uploaded document so the UI can show
+    indexing → ready/error. Keyed by (user_id, storage_path); persisted in
+    Postgres so a separate serverless ingestion worker can update it too."""
+    __tablename__ = "ingestion_jobs"
+
+    id: str = Field(default_factory=new_id, primary_key=True)
+    user_id: str = Field(foreign_key="users.id", index=True)
+    storage_path: str = Field(index=True)
+    original_name: str
+    content_type: str
+    status: str = "pending"  # pending | processing | ready | error
+    method: str | None = None  # which converter ran (pymupdf4llm / vision / ...)
+    chunks: int = 0
+    error: str | None = None
+    created_at: datetime = Field(
+        default_factory=now_utc,
+        sa_column=Column(DateTime(timezone=True))
+    )
+    updated_at: datetime = Field(
+        default_factory=now_utc,
+        sa_column=Column(DateTime(timezone=True))
+    )

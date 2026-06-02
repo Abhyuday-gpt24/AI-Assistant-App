@@ -1,9 +1,11 @@
-from fastapi import File, UploadFile, APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Body
 from typing import Optional
 from src.api.s3_bucket.s3_bucket import get_s3_client
-from src.api.schemas.schemas import FileUploadResponse, FileListResponse, FileDeleteResponse
+from src.api.deps import get_current_user
+from src.api.db.models import User
 from src.api.services.s3_bucket_service import (
-    upload_files_to_s3,
+    generate_presigned_urls,
+    verify_attachments,
     list_files_from_s3,
     delete_file_from_s3,
 )
@@ -11,28 +13,51 @@ from src.api.services.s3_bucket_service import (
 router = APIRouter()
 
 
-@router.post("/upload", response_model=FileUploadResponse, tags=["Files"])
-async def upload_files(
-    files: list[UploadFile] = File(...),
-    folder: Optional[str] = Query(None),
+@router.post("/upload/presigned", tags=["Files"])
+async def get_presigned_urls(
+    files_metadata: list[dict] = Body(
+        ...,
+        example=[{"name": "report.pdf", "content_type": "application/pdf"}],
+    ),
+    folder: Optional[str] = Query("attachments"),
+    user: User = Depends(get_current_user),
     s3=Depends(get_s3_client),
 ):
-    return await upload_files_to_s3(files, folder, s3)
+    """Frontend calls this when user attaches files that don't have a URL yet.
+    Keys are scoped to the caller: '{folder}/{user_id}/{uuid.ext}'."""
+    return generate_presigned_urls(files_metadata, folder, user.id, s3)
 
 
-@router.get("/files", response_model=FileListResponse, tags=["Files"])
+@router.post("/attachments/verify", tags=["Files"])
+async def verify_files(
+    attachments: list[dict] = Body(
+        ...,
+        example=[{"original_name": "report.pdf", "storage_path": "attachments/uuid.pdf"}],
+    ),
+    user: User = Depends(get_current_user),
+    s3=Depends(get_s3_client),
+):
+    """Backend verifies all attachments exist in S3 (and belong to the caller)
+    before passing to AI."""
+    verified = verify_attachments(attachments, user.id, s3)
+    return {"attachments": verified, "total": len(verified)}
+
+
+@router.get("/files", tags=["Files"])
 async def list_files(
-    folder: Optional[str] = Query(None),
+    folder: Optional[str] = Query("attachments"),
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
+    user: User = Depends(get_current_user),
     s3=Depends(get_s3_client),
 ):
-    return list_files_from_s3(folder, limit, offset, s3)
+    return list_files_from_s3(folder, user.id, limit, offset, s3)
 
 
-@router.delete("/files", response_model=FileDeleteResponse, tags=["Files"])
+@router.delete("/files", tags=["Files"])
 async def delete_file(
-    file_path: str = Query(..., description="Full storage path, e.g. data/images/uuid.jpg, data/doc/uuid.csv"),
+    file_path: str = Query(..., description="Full storage path"),
+    user: User = Depends(get_current_user),
     s3=Depends(get_s3_client),
 ):
-    return delete_file_from_s3(file_path, s3)
+    return delete_file_from_s3(file_path, user.id, s3)

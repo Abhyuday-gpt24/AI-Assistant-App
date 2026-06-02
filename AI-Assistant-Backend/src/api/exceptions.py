@@ -28,6 +28,11 @@ class AuthError(AppException):
         super().__init__(status_code=401, detail=detail)
 
 
+class ForbiddenError(AppException):
+    def __init__(self, detail: str = "Access denied"):
+        super().__init__(status_code=403, detail=detail)
+
+
 # Handlers
 async def app_exception_handler(request: Request, exc: AppException):
     return JSONResponse(

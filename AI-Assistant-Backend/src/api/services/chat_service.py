@@ -9,16 +9,24 @@ from config import settings
 DB_URI = settings.SUPABASE_DB_URL
 
 
-
-async def stream_chat(message: str, thread_id: str):
+async def stream_chat(message: str, thread_id: str,
+                      attachments: list[dict] | None = None,
+                      user_id: str | None = None):
     config = {"configurable": {"thread_id": thread_id}}
+    # The user turn stays CLEAN (text only) so the query-analyzer node sees just
+    # the request, never the attached file. Attachments ride in their own state
+    # field and are consumed ONLY by the synthesizer node (images inline + doc
+    # text in its system prompt). Always set it (even []) so a later turn
+    # overwrites the checkpointed value instead of replaying old attachments.
     input_data = {
         "messages": [HumanMessage(content=message)],
+        "attachments": attachments or [],
         "retrieval_result": "",
         "web_search_result": "",
         "intent": "",
         "query": message,
-        "reframed_query": "",
+        "rewritten_query": "",
+        "user_id": user_id or "",
     }
 
     try:
