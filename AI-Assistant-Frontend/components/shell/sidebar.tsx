@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { cn } from "@/lib/cn";
+import { emitNewChat } from "@/lib/events";
 import { PlusIcon, SearchIcon } from "@/components/ui/icons";
 import { SidebarHeader } from "./sidebar/sidebar-header";
 import { ProjectsSection } from "./sidebar/projects-section";
@@ -60,7 +61,13 @@ export function Sidebar({
         <div className="px-2 pt-3 pb-2">
           <Link
             href="/chat"
-            onClick={onCloseMobile}
+            onClick={() => {
+              // Force a fresh chat even when the URL is already `/chat`
+              // (after a prior chat's streaming replaceState left us on this
+              // index segment, a plain index→index nav reuses the window).
+              emitNewChat();
+              onCloseMobile();
+            }}
             title="New chat"
             className={cn(
               "flex w-full items-center gap-2 rounded-md bg-[var(--primary)] text-[var(--primary-foreground)] px-3 py-2 text-sm font-medium hover:opacity-90",
