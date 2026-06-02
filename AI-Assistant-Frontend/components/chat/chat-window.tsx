@@ -9,7 +9,7 @@ import { cn } from "@/lib/cn";
 import type { ChatMessage, MessageAttachment } from "./types";
 import { ApiError } from "@/lib/api/client";
 import { streamChat } from "@/lib/api/chat";
-import { getChats, getMessages, type MessageItem } from "@/lib/api/chats";
+import { getMessages, type MessageItem } from "@/lib/api/chats";
 import {
   ALLOWED_UPLOAD_TYPES,
   MAX_FILES_PER_MESSAGE,
@@ -65,14 +65,37 @@ export function ChatWindow({
   const [flashId, setFlashId] = useState<string | null>(null);
   const [uploads, setUploads] = useState<Upload[]>([]);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  // The chat_id is known up-front, even for a brand-new chat: we generate it
+  // client-side so document ingestion can be scoped to THIS chat's RAG namespace
+  // before the first message is ever sent. The backend creates the Chat row with
+  // this same id on first send (and rejects it if it already belongs to someone
+  // else). `persistedRef` tracks whether that server-side row exists yet.
   const chatIdRef = useRef<string | undefined>(initialChatId);
+  // Lazy init ONLY — React permits writing a ref during render solely when it's
+  // guarded by an `== null` check (one-time initialization). Generates a
+  // client-side id for a brand-new chat so ingestion can be namespaced to it.
+  if (chatIdRef.current == null) {
+    chatIdRef.current = crypto.randomUUID();
+  }
+  const persistedRef = useRef<boolean>(Boolean(initialChatId));
   const abortRef = useRef<AbortController | null>(null);
+
+  // When the chatId prop changes (navigating between chats can reuse this
+  // component instance), reset the per-chat view state DURING render — React's
+  // recommended alternative to syncing props in an effect. This also avoids the
+  // "setState synchronously within an effect" cascading-render anti-pattern that
+  // the history loader below would otherwise hit.
+  const [trackedChatId, setTrackedChatId] = useState(initialChatId);
+  if (trackedChatId !== initialChatId) {
+    setTrackedChatId(initialChatId);
+    setMessages([]);
+    setHistoryError(null);
+    setLoadingHistory(Boolean(initialChatId));
+  }
 
   useEffect(() => {
     if (!initialChatId) return;
     let cancelled = false;
-    setLoadingHistory(true);
-    setHistoryError(null);
     getMessages(initialChatId)
       .then((items) => {
         if (cancelled) return;
@@ -183,11 +206,11 @@ export function ChatWindow({
                   : u,
               ),
             );
-            // Step 5 trigger: documents get converted + embedded into this
-            // user's RAG namespace now that they're in S3. Images are skipped
-            // (they're sent to the model inline at send time).
+            // Step 5 trigger: documents get converted + embedded into THIS
+            // chat's RAG namespace (chatIdRef is always set) now that they're in
+            // S3. Images are skipped (sent to the model inline at send time).
             if (isDoc) {
-              triggerIngestion([
+              triggerIngestion(chatIdRef.current as string, [
                 {
                   storage_path: uploaded.storagePath,
                   original_name: entry.name,
@@ -297,22 +320,27 @@ export function ChatWindow({
     setDraft("");
     setUploads([]);
 
-    // No chat_id => this is a new chat. The backend has no POST /chats route;
-    // it creates the Chat row implicitly inside POST /chat/stream. We recover
-    // the new id from GET /chats after the stream completes.
-    const chatId = chatIdRef.current;
-    const createdNewChat = !chatId;
+    // The chat_id is always known (client-generated for new chats). The backend
+    // creates the Chat row with this id on first send; `persistedRef` tells us
+    // whether that's happened yet, so we know to deep-link the URL + refresh the
+    // sidebar the first time.
+    const chatId = chatIdRef.current as string;
+    const createdNewChat = !persistedRef.current;
     let receivedChatId = false;
 
-    // The backend announces the new chat's id as the stream's first frame.
-    // Apply it immediately so the URL deep-links before any content arrives.
+    // The backend echoes the chat id as the stream's first frame. For a new chat
+    // this is our own generated id; apply it once to deep-link the URL and reveal
+    // the chat in the sidebar.
     const applyChatId = (id: string) => {
       receivedChatId = true;
-      if (chatIdRef.current === id) return;
       chatIdRef.current = id;
-      // Soft URL update — keeps this component mounted (no router push).
-      window.history.replaceState(null, "", `/chat/${id}`);
-      window.dispatchEvent(new Event("chats:changed"));
+      const firstPersist = !persistedRef.current;
+      persistedRef.current = true;
+      if (firstPersist) {
+        // Soft URL update — keeps this component mounted (no router push).
+        window.history.replaceState(null, "", `/chat/${id}`);
+        window.dispatchEvent(new Event("chats:changed"));
+      }
     };
 
     const now = Date.now();
@@ -357,19 +385,12 @@ export function ChatWindow({
         },
       );
       if (createdNewChat && !receivedChatId) {
-        // Fallback for backends that don't emit a chat_id frame: the stream
-        // created the chat server-side, so recover its id from GET /chats
-        // (ordered updated_at desc, so the just-created one is first).
-        try {
-          const [created] = await getChats();
-          if (created) {
-            chatIdRef.current = created.id;
-            // Soft URL update — keeps this component mounted (no router push).
-            window.history.replaceState(null, "", `/chat/${created.id}`);
-          }
-        } catch {
-          // Non-fatal: the chat exists; the sidebar refresh below still reveals it.
-        }
+        // Fallback for backends that don't emit a chat_id frame: we already hold
+        // the client-generated id the backend created the chat under, so just
+        // deep-link the URL and refresh the sidebar.
+        persistedRef.current = true;
+        // Soft URL update — keeps this component mounted (no router push).
+        window.history.replaceState(null, "", `/chat/${chatId}`);
         window.dispatchEvent(new Event("chats:changed"));
       }
     } catch (err) {
@@ -404,10 +425,10 @@ export function ChatWindow({
           aria-live="polite"
         >
           <div className="mx-auto w-full max-w-4xl px-3 py-6 sm:px-4">
-            <div className="mb-6 border-b border-[var(--border)] pb-4">
+            <div className="mb-6 border-b border-border pb-4">
               <h2 className="text-base font-semibold">{title}</h2>
               {subtitle && (
-                <p className="mt-1 text-sm text-[var(--muted-foreground)]">
+                <p className="mt-1 text-sm text-muted-foreground">
                   {subtitle}
                 </p>
               )}
@@ -446,7 +467,7 @@ export function ChatWindow({
         />
       </div>
 
-      <div className="border-t border-[var(--border)] bg-[var(--background)]">
+      <div className="border-t border-border bg-background">
         <Chatbox
           value={draft}
           onChange={setDraft}
@@ -476,15 +497,15 @@ function MessageBubble({
       className={cn(
         "flex items-start gap-3 transition-shadow",
         isUser && "flex-row-reverse",
-        flash && "rounded-2xl ring-2 ring-[var(--ring)]/60",
+        flash && "rounded-2xl ring-2 ring-(--ring)/60",
       )}
     >
       <div
         className={cn(
           "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
           isUser
-            ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
-            : "bg-[var(--accent)] text-[var(--accent-foreground)]",
+            ? "bg-primary text-primary-foreground"
+            : "bg-accent text-accent-foreground",
         )}
         aria-hidden
       >
@@ -498,8 +519,8 @@ function MessageBubble({
         className={cn(
           "max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed",
           isUser
-            ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
-            : "bg-[var(--muted)] text-[var(--foreground)]",
+            ? "bg-primary text-primary-foreground"
+            : "bg-muted text-foreground",
         )}
       >
         {streaming ? (
@@ -511,7 +532,7 @@ function MessageBubble({
                 {message.attachments.map((att) => (
                   <li
                     key={att.storagePath}
-                    className="flex max-w-[200px] items-center gap-1.5 rounded-lg bg-[var(--primary-foreground)]/15 px-2 py-1 text-xs"
+                    className="flex max-w-50 items-center gap-1.5 rounded-lg bg-(--primary-foreground)/15 px-2 py-1 text-xs"
                   >
                     <FileIcon className="h-3.5 w-3.5 shrink-0" />
                     <span className="truncate" title={att.name}>
@@ -536,9 +557,9 @@ function MessageBubble({
 function TypingDots() {
   return (
     <span className="inline-flex items-center gap-1 py-1" aria-label="Assistant is typing">
-      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[var(--muted-foreground)] [animation-delay:-0.3s]" />
-      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[var(--muted-foreground)] [animation-delay:-0.15s]" />
-      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[var(--muted-foreground)]" />
+      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.3s]" />
+      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.15s]" />
+      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground" />
     </span>
   );
 }
@@ -548,8 +569,8 @@ function HistorySkeleton() {
     <ul className="space-y-5" aria-busy="true" aria-label="Loading chat history">
       {[0, 1, 2].map((i) => (
         <li key={i} className={cn("flex items-start gap-3", i % 2 === 0 && "flex-row-reverse")}>
-          <div className="h-8 w-8 shrink-0 animate-pulse rounded-full bg-[var(--muted)]" />
-          <div className="h-12 w-2/3 animate-pulse rounded-2xl bg-[var(--muted)]" />
+          <div className="h-8 w-8 shrink-0 animate-pulse rounded-full bg-muted" />
+          <div className="h-12 w-2/3 animate-pulse rounded-2xl bg-muted" />
         </li>
       ))}
     </ul>
@@ -560,7 +581,7 @@ function HistoryError({ message }: { message: string }) {
   return (
     <div
       role="alert"
-      className="rounded-md border border-[var(--border)] bg-[var(--muted)] px-3 py-2 text-sm text-[var(--foreground)]"
+      className="rounded-md border border-border bg-muted px-3 py-2 text-sm text-foreground"
     >
       Couldn&apos;t load chat history: {message}
     </div>
@@ -570,11 +591,11 @@ function HistoryError({ message }: { message: string }) {
 function EmptyState() {
   return (
     <div className="flex flex-col items-center justify-center py-16 text-center">
-      <div className="mb-3 inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--accent)] text-[var(--accent-foreground)]">
+      <div className="mb-3 inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-accent text-accent-foreground">
         <MessageIcon className="h-6 w-6" />
       </div>
       <h3 className="text-base font-semibold">Start a new conversation</h3>
-      <p className="mt-1 max-w-sm text-sm text-[var(--muted-foreground)]">
+      <p className="mt-1 max-w-sm text-sm text-muted-foreground">
         Ask a question, paste content, or describe what you&apos;d like help with.
       </p>
     </div>

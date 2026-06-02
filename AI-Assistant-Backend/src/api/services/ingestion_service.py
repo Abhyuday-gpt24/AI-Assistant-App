@@ -10,7 +10,7 @@ Pipeline per document:
   2. convert → Markdown (text / markitdown / pymupdf4llm / vision)
   3. upload any vision-extracted images to S3, swap placeholders → public URLs
   4. save the Markdown to S3 ('attachments/{user_id}/markdown/{uuid}.md')
-  5. chunk the Markdown and embed into the user's Pinecone namespace (= user_id)
+  5. chunk the Markdown and embed into the chat's Pinecone namespace (= chat_id)
 """
 
 import asyncio
@@ -36,8 +36,12 @@ logger = logging.getLogger(__name__)
 
 
 def ingest_document(storage_path: str, original_name: str, content_type: str,
-                    user_id: str, s3) -> dict:
-    """Convert one uploaded document and embed it into the user's namespace."""
+                    user_id: str, chat_id: str, s3) -> dict:
+    """Convert one uploaded document and embed it into the chat's namespace.
+
+    `user_id` still owns the S3 paths (extracted images, saved Markdown) and is
+    kept in chunk metadata; `chat_id` is the Pinecone namespace, so retrieval is
+    scoped to this chat alone."""
     if content_type not in DOC_TYPES:
         # Images aren't ingested — they're sent to the chat model inline.
         return {"storage_path": storage_path, "skipped": True, "reason": "not a document"}
@@ -59,10 +63,10 @@ def ingest_document(storage_path: str, original_name: str, content_type: str,
     md_key = markdown_key(storage_path, user_id)
     upload_bytes(md_key, markdown.encode("utf-8"), "text/markdown", s3)
 
-    # 5) chunk + embed into the per-user namespace
+    # 5) chunk + embed into the per-chat namespace
     chunks = chunk_markdown(markdown, source=original_name, storage_path=storage_path)
     if chunks:
-        store = get_vector_store(namespace=user_id)
+        store = get_vector_store(namespace=chat_id)
         documents = [
             Document(
                 page_content=c["text"],
@@ -72,6 +76,7 @@ def ingest_document(storage_path: str, original_name: str, content_type: str,
                     "storage_path": c["storage_path"],
                     "image_urls": c["image_urls"],
                     "user_id": user_id,
+                    "chat_id": chat_id,
                 },
             )
             for c in chunks
@@ -105,13 +110,13 @@ async def _update_job(db, user_id: str, storage_path: str, **fields) -> None:
     await db.commit()
 
 
-async def run_ingestion_jobs(files: list[dict], user_id: str) -> None:
+async def run_ingestion_jobs(files: list[dict], user_id: str, chat_id: str) -> None:
     """Background entrypoint: ingest a batch, updating each job's DB status.
 
     Async so it can write status via the app's async DB session, but the heavy
     per-file conversion (sync, blocking) is pushed to a worker thread with
     `asyncio.to_thread` so it doesn't stall the event loop. Failures are
-    isolated per file.
+    isolated per file. `chat_id` is the namespace each file is embedded into.
     """
     from src.api.s3_bucket.s3_bucket import get_s3_client
 
@@ -122,7 +127,8 @@ async def run_ingestion_jobs(files: list[dict], user_id: str) -> None:
             try:
                 res = await asyncio.to_thread(
                     ingest_document,
-                    f["storage_path"], f["original_name"], f["content_type"], user_id, s3,
+                    f["storage_path"], f["original_name"], f["content_type"],
+                    user_id, chat_id, s3,
                 )
                 await _update_job(
                     db, user_id, f["storage_path"],

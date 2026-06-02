@@ -36,12 +36,16 @@ class ChatRequest(SQLModel):
 
 # Ingestion schemas
 class IngestFile(SQLModel):
-    """One uploaded document to convert + embed into the user's RAG namespace."""
+    """One uploaded document to convert + embed into the chat's RAG namespace."""
     storage_path: str
     original_name: str
     content_type: str
 
 class IngestRequest(SQLModel):
+    # chat_id is the Pinecone namespace the docs get embedded into, so each chat
+    # only ever retrieves its own files. The frontend generates this id for a new
+    # chat before the first message, so it's available at upload time.
+    chat_id: str
     files: List[IngestFile]
 
 class ChatSummary(SQLModel):

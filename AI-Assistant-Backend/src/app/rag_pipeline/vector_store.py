@@ -10,10 +10,10 @@ index_initialized = False
 
 
 def get_vector_store(namespace: str):
-    """Vector store scoped to a namespace (the user_id). RAG is fully per-user —
+    """Vector store scoped to a namespace (the chat_id). RAG is fully per-chat —
     there is no shared/global knowledge base, so a namespace is required."""
     if not namespace:
-        raise ValueError("get_vector_store requires a namespace (user_id)")
+        raise ValueError("get_vector_store requires a namespace (chat_id)")
     global index_initialized
     collection = namespace
     if collection in vector_stores:
@@ -47,9 +47,9 @@ def get_vector_store(namespace: str):
 
 
 def get_retriever(namespace: str, k=4):
-    """Retriever scoped to a namespace (the user_id). Per-user only."""
+    """Retriever scoped to a namespace (the chat_id). Per-chat only."""
     if not namespace:
-        raise ValueError("get_retriever requires a namespace (user_id)")
+        raise ValueError("get_retriever requires a namespace (chat_id)")
     collection = namespace
     if collection in retrievers:
         return retrievers[collection]

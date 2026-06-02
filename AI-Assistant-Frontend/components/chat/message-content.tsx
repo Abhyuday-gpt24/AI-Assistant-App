@@ -35,7 +35,7 @@ const components: Components = {
       href={href}
       target="_blank"
       rel="noreferrer noopener"
-      className="font-medium text-[var(--primary)] underline underline-offset-2 hover:opacity-80"
+      className="font-medium text-primary underline underline-offset-2 hover:opacity-80"
     >
       {children}
     </a>
@@ -43,16 +43,16 @@ const components: Components = {
   strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
   em: ({ children }) => <em className="italic">{children}</em>,
   del: ({ children }) => <del className="opacity-70">{children}</del>,
-  hr: () => <hr className="my-4 border-[var(--border)]" />,
+  hr: () => <hr className="my-4 border-border" />,
   blockquote: ({ children }) => (
-    <blockquote className="mb-3 border-l-2 border-[var(--border)] pl-3 text-[var(--muted-foreground)] last:mb-0">
+    <blockquote className="mb-3 border-l-2 border-border pl-3 text-muted-foreground last:mb-0">
       {children}
     </blockquote>
   ),
   code: ({ className, children }) => (
     <code
       className={cn(
-        "rounded bg-[var(--background)] px-1.5 py-0.5 font-mono text-[0.85em]",
+        "rounded bg-background px-1.5 py-0.5 font-mono text-[0.85em]",
         className,
       )}
     >
@@ -60,7 +60,7 @@ const components: Components = {
     </code>
   ),
   pre: ({ children }) => (
-    <pre className="mb-3 overflow-x-auto rounded-lg border border-[var(--border)] bg-[var(--background)] p-3 text-[0.85em] leading-relaxed last:mb-0 [&_code]:rounded-none [&_code]:bg-transparent [&_code]:p-0">
+    <pre className="mb-3 overflow-x-auto rounded-lg border border-border bg-background p-3 text-[0.85em] leading-relaxed last:mb-0 [&_code]:rounded-none [&_code]:bg-transparent [&_code]:p-0">
       {children}
     </pre>
   ),
@@ -72,12 +72,12 @@ const components: Components = {
     </div>
   ),
   th: ({ children }) => (
-    <th className="border border-[var(--border)] px-2 py-1 font-semibold">
+    <th className="border border-border px-2 py-1 font-semibold">
       {children}
     </th>
   ),
   td: ({ children }) => (
-    <td className="border border-[var(--border)] px-2 py-1">{children}</td>
+    <td className="border border-border px-2 py-1">{children}</td>
   ),
 };
 

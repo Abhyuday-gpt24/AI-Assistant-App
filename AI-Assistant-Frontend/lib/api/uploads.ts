@@ -144,16 +144,18 @@ export async function uploadFile(file: File): Promise<UploadedFile> {
 }
 
 // Step 5 trigger: once a document has finished uploading to S3, tell the backend
-// to convert + embed it into this user's RAG namespace. Runs server-side in a
-// background task, so this returns quickly. Images are skipped (sent inline).
+// to convert + embed it into THIS chat's RAG namespace (keyed by chat_id, so a
+// chat only ever retrieves its own files). Runs server-side in a background
+// task, so this returns quickly. Images are skipped (sent inline).
 export async function triggerIngestion(
+  chatId: string,
   files: { storage_path: string; original_name: string; content_type: string }[],
 ): Promise<void> {
   if (files.length === 0) return;
   const res = await apiFetch("/api/ingestion/process", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ files }),
+    body: JSON.stringify({ chat_id: chatId, files }),
   });
   if (!res.ok) throw await parseError(res);
 }

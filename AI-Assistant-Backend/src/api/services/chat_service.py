@@ -27,6 +27,8 @@ async def stream_chat(message: str, thread_id: str,
         "query": message,
         "rewritten_query": "",
         "user_id": user_id or "",
+        # thread_id IS the chat_id; RAG retrieval is scoped to this chat's namespace.
+        "chat_id": thread_id,
     }
 
     try:

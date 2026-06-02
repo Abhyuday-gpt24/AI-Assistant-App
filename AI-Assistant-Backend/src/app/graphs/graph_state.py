@@ -11,7 +11,8 @@ class AgentState(TypedDict):
     input_tokens: int
     truncation_count:int
     summarization_count:int
-    user_id: str   # scopes RAG retrieval to this user's Pinecone namespace
+    user_id: str   # the owner; used for S3 paths + ownership, not for RAG scoping
+    chat_id: str   # scopes RAG retrieval to THIS chat's Pinecone namespace (= thread_id)
     attachments: list   # files attached this turn — consumed ONLY by the synthesizer node
 
 

@@ -93,21 +93,34 @@ async def chat_stream(
                 # convert on the fly), independent of RAG retrieval.
                 await _attach_doc_markdown(att, user.id, s3)
 
-    # Create new chat or use existing
+    # Resolve the chat. The frontend now generates the chat_id client-side (so it
+    # can scope RAG ingestion to this chat's namespace before the first message),
+    # so a supplied id may be either an existing chat OR a brand-new one.
+    #
+    # Security gate (mandatory): look the id up by itself.
+    #   - exists & owned by caller  → resume it.
+    #   - exists & owned by SOMEONE ELSE → 404. This is the attack case: a forged
+    #     id would otherwise let a user inject messages into / resume another
+    #     user's LangGraph thread (the checkpointer keys on thread_id == chat_id)
+    #     or read their RAG namespace. 404 (not 403) so we don't leak which ids
+    #     exist.
+    #   - does not exist → create it with THIS id (client-supplied), owned by the
+    #     caller. (Replaces the old server-generated implicit creation.)
+    from fastapi import HTTPException
     if req.chat_id:
-        # Ownership gate: the chat must exist AND belong to the caller. Without
-        # this a user could pass another user's chat_id to inject messages into
-        # their conversation — or resume their LangGraph thread, since the
-        # checkpointer keys on thread_id == chat_id and would replay that
-        # private context. 404 (not 403) so we don't leak which ids exist.
-        result = await db.execute(
-            select(Chat).where(Chat.id == req.chat_id, Chat.user_id == user.id)
-        )
-        if not result.scalar_one_or_none():
-            from fastapi import HTTPException
-            raise HTTPException(status_code=404, detail="Chat not found")
-        chat_id = req.chat_id
+        result = await db.execute(select(Chat).where(Chat.id == req.chat_id))
+        existing = result.scalar_one_or_none()
+        if existing is not None:
+            if existing.user_id != user.id:
+                raise HTTPException(status_code=404, detail="Chat not found")
+            chat_id = existing.id
+        else:
+            chat = Chat(id=req.chat_id, user_id=user.id, title=req.message[:50])
+            db.add(chat)
+            await db.commit()
+            chat_id = chat.id
     else:
+        # Legacy path: no client id supplied → server generates one.
         chat = Chat(user_id=user.id, title=req.message[:50])
         db.add(chat)
         await db.commit()
