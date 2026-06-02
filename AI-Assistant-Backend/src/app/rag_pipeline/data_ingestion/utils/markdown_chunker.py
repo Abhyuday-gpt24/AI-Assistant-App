@@ -1,8 +1,9 @@
-"""Chunk an in-memory Markdown string (for the live, per-user ingestion path).
+"""Chunk an in-memory Markdown string — the single source of truth for the
+chunking strategy (header-aware split, then recursive char split).
 
-Mirrors the offline `chunker.chunk_file` splitting strategy (header-aware then
-recursive char split) but takes a string instead of a file path, and lifts any
-image URLs found in a chunk into its metadata so retrieval can surface them.
+Used directly by the live, per-user ingestion path; the offline batch pipeline's
+`batch_chunker.ingest_file` delegates here after converting each file to Markdown.
+Image URLs found in a chunk are lifted into its metadata so retrieval can surface them.
 """
 
 import hashlib

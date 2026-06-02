@@ -4,8 +4,8 @@ import {
   useEffect,
   useRef,
   type ChangeEvent,
-  type FormEvent,
   type KeyboardEvent,
+  type SubmitEvent,
 } from "react";
 import {
   CloseIcon,
@@ -65,7 +65,7 @@ export function Chatbox({
     onSubmit();
   }
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  function handleSubmit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     submit();
   }
