@@ -5,18 +5,21 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.db.database import get_db
-from src.api.db.models import User, Chat, Message
+from src.api.db.models import User, Chat, Message, ChatAttachment
 from src.api.schemas.schemas import ChatRequest, ChatSummary
 from src.api.deps import get_current_user
 from sqlmodel import select
 import base64
 from src.api.services.chat_service import stream_chat
+from src.api.services.chat_deletion_service import delete_chat
 from src.api.s3_bucket.s3_bucket import get_s3_client
 from src.api.services.s3_bucket_service import (
     verify_attachments,
     download_bytes,
     markdown_key,
     IMAGE_TYPES,
+    CATEGORY_IMAGES,
+    CATEGORY_DOCS,
 )
 
 router = APIRouter()
@@ -128,6 +131,30 @@ async def chat_stream(
 
     # Save user message
     db.add(Message(chat_id=chat_id, role="user", content=req.message))
+
+    # Record this turn's attachments against the chat. S3 keys are per-USER (not
+    # per-chat), so this table is the only record of which files belong to which
+    # chat — it's what lets chat deletion clean up exactly the right S3 objects.
+    # De-dup so re-sending the same file across turns doesn't double-insert.
+    if verified_attachments:
+        existing = await db.execute(
+            select(ChatAttachment.storage_path).where(ChatAttachment.chat_id == chat_id)
+        )
+        already = set(existing.scalars().all())
+        for att in verified_attachments:
+            path = att["storage_path"]
+            if path in already:
+                continue
+            already.add(path)
+            db.add(ChatAttachment(
+                chat_id=chat_id,
+                user_id=user.id,
+                storage_path=path,
+                original_name=att.get("original_name") or "",
+                content_type=att.get("content_type") or "",
+                category=(CATEGORY_IMAGES if att.get("content_type") in IMAGE_TYPES
+                          else CATEGORY_DOCS),
+            ))
     await db.commit()
 
     # Stream and collect full response
@@ -176,3 +203,24 @@ async def get_messages(
     )
     messages = result.scalars().all()
     return [{"role": m.role, "content": m.content, "created_at": str(m.created_at)} for m in messages]
+
+
+@router.delete("/chats/{chat_id}")
+async def remove_chat(
+    chat_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    s3=Depends(get_s3_client),
+):
+    """Delete a chat and everything it owns: its messages + attachment records,
+    the uploaded S3 files (source + Markdown + extracted images), the chat's
+    Pinecone namespace, and its LangGraph checkpointer thread. Owner-gated:
+    404 (not 403) for someone else's id so we don't leak which ids exist."""
+    from fastapi import HTTPException
+    result = await db.execute(
+        select(Chat).where(Chat.id == chat_id, Chat.user_id == user.id)
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    return await delete_chat(chat_id, user.id, db, s3)

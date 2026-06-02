@@ -1,12 +1,29 @@
 import json
+import logging
 from langchain_core.messages import HumanMessage
 from contextlib import asynccontextmanager
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-from src.app.graphs.graph import uncompiled_graph 
+from src.app.graphs.graph import uncompiled_graph
 from config import settings
 
 
+logger = logging.getLogger(__name__)
+
 DB_URI = settings.SUPABASE_DB_URL
+
+
+async def delete_chat_thread(thread_id: str) -> None:
+    """Purge a chat's LangGraph checkpointer state (keyed on thread_id == chat_id)
+    from Postgres, so a deleted chat leaves no resumable graph memory behind.
+    Best-effort: if the saver can't be reached or the thread has no checkpoints,
+    deletion of the rest of the chat must still proceed."""
+    try:
+        async with AsyncPostgresSaver.from_conn_string(DB_URI) as checkpointer:
+            await checkpointer.setup()
+            await checkpointer.adelete_thread(thread_id)
+    except Exception:
+        logger.warning("Failed to delete checkpointer thread %s", thread_id,
+                       exc_info=True)
 
 
 async def stream_chat(message: str, thread_id: str,

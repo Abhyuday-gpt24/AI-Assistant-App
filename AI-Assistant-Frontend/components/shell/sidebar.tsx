@@ -1,10 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { useCallback, useState } from "react";
 import { cn } from "@/lib/cn";
-import { emitNewChat } from "@/lib/events";
+import { deleteChat } from "@/lib/api/chats";
+import { emitChatsChanged, emitNewChat } from "@/lib/events";
+import { useDialog } from "@/components/ui/dialog";
 import { PlusIcon, SearchIcon } from "@/components/ui/icons";
 import { SidebarHeader } from "./sidebar/sidebar-header";
 import { ProjectsSection } from "./sidebar/projects-section";
@@ -26,8 +28,45 @@ export function Sidebar({
   onCloseMobile,
 }: SidebarProps) {
   const pathname = usePathname();
+  const router = useRouter();
+  const { confirm, alert } = useDialog();
   const [query, setQuery] = useState("");
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const { filteredChats, loadingChats, chatsError } = useChats(query);
+
+  // Confirm, then delete the chat (and its server-side files/namespace) and
+  // refresh the list. If the deleted chat is the one open, fall back to a fresh
+  // New chat. Owns the per-row `deletingId` so the row only renders the spinner.
+  const handleDeleteChat = useCallback(
+    async (id: string, title: string) => {
+      const ok = await confirm({
+        title: "Delete chat",
+        message: `Delete "${title}"? This also removes its uploaded files and can't be undone.`,
+        confirmLabel: "Delete",
+        cancelLabel: "Cancel",
+        variant: "danger",
+      });
+      if (!ok) return;
+
+      setDeletingId(id);
+      try {
+        await deleteChat(id);
+        emitChatsChanged();
+        if (pathname === `/chat/${id}`) {
+          router.push("/chat");
+          emitNewChat();
+        }
+      } catch {
+        await alert({
+          title: "Delete failed",
+          message: "Couldn't delete the chat. Please try again.",
+        });
+      } finally {
+        setDeletingId(null);
+      }
+    },
+    [confirm, alert, pathname, router],
+  );
 
   return (
     <>
@@ -106,6 +145,8 @@ export function Sidebar({
           filteredChats={filteredChats}
           loadingChats={loadingChats}
           chatsError={chatsError}
+          onDeleteChat={handleDeleteChat}
+          deletingId={deletingId}
         />
 
         <SidebarFooter collapsed={collapsed} />

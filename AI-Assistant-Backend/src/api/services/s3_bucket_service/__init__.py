@@ -35,6 +35,7 @@ from src.api.services.s3_bucket_service.operations import (
     verify_attachments,
     list_files_from_s3,
     delete_file_from_s3,
+    delete_chat_attachments_from_s3,
 )
 from src.api.services.s3_bucket_service.byte_io import (
     download_bytes,
@@ -65,6 +66,7 @@ __all__ = [
     "verify_attachments",
     "list_files_from_s3",
     "delete_file_from_s3",
+    "delete_chat_attachments_from_s3",
     # byte_io
     "download_bytes",
     "upload_bytes",

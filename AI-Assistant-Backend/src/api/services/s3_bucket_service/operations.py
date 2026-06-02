@@ -10,13 +10,17 @@ from src.api.exceptions import AppException, NotFoundError, ForbiddenError
 
 from src.api.services.s3_bucket_service.constants import (
     ALLOWED_TYPES,
+    IMAGE_TYPES,
     MAX_FILES_PER_MESSAGE,
     PRESIGNED_EXPIRY,
+    CATEGORY_EXTRACTED,
 )
 from src.api.services.s3_bucket_service.paths import (
     _user_prefix,
     _owns_path,
+    _doc_uuid,
     categorize,
+    markdown_key,
 )
 
 
@@ -137,3 +141,59 @@ def delete_file_from_s3(file_path, user_id, s3):
 
     s3.delete_object(Bucket=settings.SUPABASE_BUCKET, Key=file_path)
     return {"message": "File deleted successfully", "file_path": file_path}
+
+
+def _list_prefix_keys(prefix, s3):
+    """Every object key under a prefix (paginated). Empty list if none."""
+    keys = []
+    token = None
+    while True:
+        kwargs = {"Bucket": settings.SUPABASE_BUCKET, "Prefix": prefix}
+        if token:
+            kwargs["ContinuationToken"] = token
+        resp = s3.list_objects_v2(**kwargs)
+        keys.extend(o["Key"] for o in resp.get("Contents", []))
+        if resp.get("IsTruncated"):
+            token = resp.get("NextContinuationToken")
+        else:
+            break
+    return keys
+
+
+def _delete_keys(keys, s3):
+    """Batch-delete keys (S3 caps delete_objects at 1000 per call)."""
+    keys = list(dict.fromkeys(k for k in keys if k))  # de-dup, drop falsy
+    for i in range(0, len(keys), 1000):
+        batch = keys[i:i + 1000]
+        s3.delete_objects(
+            Bucket=settings.SUPABASE_BUCKET,
+            Delete={"Objects": [{"Key": k} for k in batch], "Quiet": True},
+        )
+    return len(keys)
+
+
+def delete_chat_attachments_from_s3(attachments, user_id, s3):
+    """Delete every S3 object tied to a chat's attachments. For each attachment:
+    the source file itself, and — for documents — its converted Markdown plus the
+    whole `extracted/{uuid}/` image folder. Ownership-gated; missing objects are
+    ignored (delete_objects is idempotent). `attachments` is a list of dicts with
+    at least `storage_path` and `content_type`.
+    """
+    keys = []
+    for att in attachments:
+        path = att.get("storage_path")
+        if not path or not _owns_path(path, user_id):
+            continue  # defensive: never touch another user's keys
+        keys.append(path)
+        # Images aren't ingested → only the source file exists. Documents also
+        # have a saved Markdown sidecar and possibly extracted images.
+        if att.get("content_type") not in IMAGE_TYPES:
+            keys.append(markdown_key(path, user_id))
+            extracted_prefix = (
+                f"{_user_prefix('attachments', user_id)}/"
+                f"{CATEGORY_EXTRACTED}/{_doc_uuid(path)}/"
+            )
+            keys.extend(_list_prefix_keys(extracted_prefix, s3))
+
+    deleted = _delete_keys(keys, s3)
+    return {"deleted": deleted}

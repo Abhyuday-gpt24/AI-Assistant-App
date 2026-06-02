@@ -65,6 +65,27 @@ class Message(SQLModel, table=True):
     chat: Chat | None = Relationship(back_populates="messages")
 
 
+class ChatAttachment(SQLModel, table=True):
+    """One row per file attached to a chat (images + docs), recorded when a turn
+    is sent. Chat attachments don't otherwise live in the DB and S3 keys are
+    per-USER (not per-chat), so this is the only record of which files belong to
+    which chat — it's what lets chat deletion clean up the right S3 objects.
+    Brand-new table, so `create_all` adds it on startup (no migration needed)."""
+    __tablename__ = "chat_attachments"
+
+    id: str = Field(default_factory=new_id, primary_key=True)
+    chat_id: str = Field(foreign_key="chats.id", index=True)
+    user_id: str = Field(foreign_key="users.id", index=True)
+    storage_path: str = Field(index=True)
+    original_name: str = ""
+    content_type: str = ""
+    category: str = ""  # images | docs
+    created_at: datetime = Field(
+        default_factory=now_utc,
+        sa_column=Column(DateTime(timezone=True))
+    )
+
+
 class IngestionJob(SQLModel, table=True):
     """Tracks RAG ingestion of one uploaded document so the UI can show
     indexing → ready/error. Keyed by (user_id, storage_path); persisted in

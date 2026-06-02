@@ -4,6 +4,7 @@ import "./globals.css";
 import { AuthProvider } from "@/components/auth/auth-provider";
 import { ThemeProvider } from "@/components/theme/theme-provider";
 import { ThemeScript } from "@/components/theme/theme-script";
+import { DialogProvider } from "@/components/ui/dialog";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -36,7 +37,9 @@ export default function RootLayout({
       </head>
       <body className="min-h-full bg-[var(--background)] text-[var(--foreground)]">
         <ThemeProvider>
-          <AuthProvider>{children}</AuthProvider>
+          <AuthProvider>
+            <DialogProvider>{children}</DialogProvider>
+          </AuthProvider>
         </ThemeProvider>
       </body>
     </html>
