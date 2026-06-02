@@ -37,7 +37,10 @@ app.add_middleware(AuthMiddleware)       # checks JWT, attaches user
 app.add_middleware(LoggingMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # exact origin, not "*"
+    allow_origins=[
+        "http://localhost:3000",
+        "http://100.48.47.97:3000",  # EC2 frontend origin
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
