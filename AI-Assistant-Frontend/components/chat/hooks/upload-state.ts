@@ -5,6 +5,7 @@ import {
 } from "@/lib/api/uploads";
 import type { AttachedFile } from "../chatbox";
 import type { MessageAttachment } from "../types";
+import { randomUUID } from "@/lib/uuid";
 
 // Internal, richer shape than the Chatbox's display-only AttachedFile: it keeps
 // the File and the storage_path we get back from S3 so send() can reuse it.
@@ -41,7 +42,7 @@ export function buildUploadEntries(
   const entries: Upload[] = [];
   let count = existingCount;
   for (const file of files) {
-    const id = crypto.randomUUID();
+    const id = randomUUID();
     if (!ALLOWED_SET.has(file.type)) {
       entries.push({
         id,
