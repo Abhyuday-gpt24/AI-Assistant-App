@@ -16,9 +16,9 @@ EXPIRE_HOURS = int(settings.EXPIRE_HOURS)
 
 
 COOKIE_CONFIG = {
-    "httponly": True,      
-    "secure": True,        
-    "samesite": "lax",     
+    "httponly": True,
+    "secure": settings.COOKIE_SECURE,   # False over plain HTTP, else browser drops it
+    "samesite": "lax",
     "max_age": EXPIRE_HOURS * 3600,
     "path": "/"
 }

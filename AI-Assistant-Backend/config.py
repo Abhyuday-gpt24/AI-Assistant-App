@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     SECRET_KEY: str
     ALGORITHM: str
     EXPIRE_HOURS: int
+    # Set to False when serving the app over plain HTTP (e.g. an EC2 public IP
+    # with no TLS). A "Secure" cookie is silently dropped by the browser on
+    # non-HTTPS connections, which breaks auth. Keep True for any HTTPS deploy.
+    COOKIE_SECURE: bool = True
 
 
     class Config:

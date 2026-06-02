@@ -38,8 +38,9 @@ app.add_middleware(LoggingMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:3000",
-        "http://100.48.47.97:3000",  # EC2 frontend origin
+        "http://localhost:3000",       # local dev
+        "https://miniai.online",       # production (Nginx HTTPS, single origin)
+        "https://www.miniai.online",   # in case the www host is used
     ],
     allow_credentials=True,
     allow_methods=["*"],
