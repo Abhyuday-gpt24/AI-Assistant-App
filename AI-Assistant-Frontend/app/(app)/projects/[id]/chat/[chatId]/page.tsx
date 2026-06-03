@@ -10,5 +10,5 @@ export default async function ProjectChatPage({
   params: Promise<{ id: string; chatId: string }>;
 }) {
   const { id, chatId } = await params;
-  return <ChatWindow title="Chat" projectId={id} chatId={chatId} />;
+  return <ChatWindow projectId={id} chatId={chatId} />;
 }

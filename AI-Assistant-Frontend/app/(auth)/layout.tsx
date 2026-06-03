@@ -27,7 +27,12 @@ export default function AuthLayout({
               <polyline points="14 2 14 8 20 8" />
             </svg>
           </div>
-          <h1 className="text-xl font-semibold tracking-tight">AI Doc Assist</h1>
+          <h1 className="font-logo select-none text-2xl font-bold tracking-tight">
+            mini
+            <span className="bg-gradient-to-r from-[var(--primary)] to-emerald-400 bg-clip-text text-transparent">
+              AI
+            </span>
+          </h1>
           <p className="mt-1 text-sm text-[var(--muted-foreground)]">
             Your assistant for documents and chat.
           </p>

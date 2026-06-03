@@ -21,11 +21,5 @@ export default function ChatIndexPage() {
     return () => window.removeEventListener(NEW_CHAT_EVENT, onNewChat);
   }, []);
 
-  return (
-    <ChatWindow
-      key={resetKey}
-      title="New chat"
-      subtitle="Ask anything to get started."
-    />
-  );
+  return <ChatWindow key={resetKey} />;
 }

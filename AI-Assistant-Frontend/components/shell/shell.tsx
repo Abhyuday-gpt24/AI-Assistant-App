@@ -7,10 +7,8 @@ import { Footer } from "./footer";
 
 export function Shell({
   children,
-  title,
 }: {
   children: React.ReactNode;
-  title: string;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -28,7 +26,7 @@ export function Shell({
         onCloseMobile={closeMobile}
       />
       <div className="flex min-w-0 flex-1 flex-col">
-        <Header onOpenMobile={openMobile} title={title} />
+        <Header onOpenMobile={openMobile} />
         <main className="flex min-h-0 flex-1 flex-col">{children}</main>
         <Footer />
       </div>

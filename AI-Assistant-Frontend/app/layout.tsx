@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist, Geist_Mono, Space_Grotesk } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/components/auth/auth-provider";
 import { ThemeProvider } from "@/components/theme/theme-provider";
@@ -16,8 +16,16 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+// Display typeface for the "miniAI" wordmark only (exposed as the `font-logo`
+// utility via globals.css @theme).
+const spaceGrotesk = Space_Grotesk({
+  variable: "--font-logo-display",
+  subsets: ["latin"],
+  weight: ["600", "700"],
+});
+
 export const metadata: Metadata = {
-  title: "AI Doc Assist",
+  title: "miniAI",
   description: "An AI powered document assistant.",
 };
 
@@ -30,7 +38,7 @@ export default function RootLayout({
     <html
       lang="en"
       suppressHydrationWarning
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} ${spaceGrotesk.variable} h-full antialiased`}
     >
       <head>
         <ThemeScript />

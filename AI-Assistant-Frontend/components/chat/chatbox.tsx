@@ -167,7 +167,7 @@ export function Chatbox({
             value={value}
             onChange={(event) => onChange(event.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Message AI Doc Assist..."
+            placeholder="Message miniAI..."
             disabled={disabled}
             className="block max-h-60 min-h-13 w-full resize-none bg-transparent px-2 py-2.5 text-base leading-relaxed text-foreground placeholder:text-muted-foreground focus:outline-none disabled:opacity-50"
           />

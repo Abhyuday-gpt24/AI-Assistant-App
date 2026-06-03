@@ -17,8 +17,16 @@ export function SidebarHeader({
         collapsed && "md:justify-center md:px-2",
       )}
     >
-      <span className={cn("text-sm font-semibold", collapsed && "md:hidden")}>
-        AI Doc Assist
+      <span
+        className={cn(
+          "font-logo select-none text-xl font-bold leading-none tracking-tight",
+          collapsed && "md:hidden",
+        )}
+      >
+        mini
+        <span className="bg-gradient-to-r from-[var(--primary)] to-emerald-400 bg-clip-text text-transparent">
+          AI
+        </span>
       </span>
       <button
         type="button"

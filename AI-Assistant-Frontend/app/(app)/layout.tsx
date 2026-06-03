@@ -5,5 +5,5 @@ export default function AppLayout({
 }: {
   children: React.ReactNode;
 }) {
-  return <Shell title="Chat">{children}</Shell>;
+  return <Shell>{children}</Shell>;
 }

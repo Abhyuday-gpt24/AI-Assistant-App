@@ -19,12 +19,5 @@ export function ProjectNewChat({ projectId }: { projectId: string }) {
     return () => window.removeEventListener(NEW_CHAT_EVENT, onNewChat);
   }, []);
 
-  return (
-    <ChatWindow
-      key={resetKey}
-      projectId={projectId}
-      title="New chat"
-      subtitle="Documents you attach here are shared across this project."
-    />
-  );
+  return <ChatWindow key={resetKey} projectId={projectId} />;
 }
