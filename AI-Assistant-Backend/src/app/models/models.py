@@ -22,7 +22,7 @@ deepseek_pro_model = ChatDeepSeek(
     temperature=0,
     max_tokens=8000,
     api_key=settings.DEEPSEEK_API_KEY,
-    reasoning_effort="medium",
+    reasoning_effort="low",
     )
 
 # Groq GPT OSS 20B — used by the Tavily web-search node (mcp/tavily_search.py).
@@ -39,6 +39,7 @@ gpt_5_nano_model = ChatOpenAI(
     temperature=0,
     reasoning_effort="low",
     max_tokens=500,
+    reasoning_effort="low",
     api_key=settings.OPENAI_API_KEY
 )
 
@@ -47,7 +48,7 @@ gpt_5_nano_model = ChatOpenAI(
 gpt_5_mini_model = ChatOpenAI(
     model="gpt-5-mini",
     temperature=0,
-    reasoning_effort="medium",
+    reasoning_effort="low",
     api_key=settings.OPENAI_API_KEY
 )
 
@@ -55,7 +56,7 @@ gpt_5_mini_model = ChatOpenAI(
 gpt_5_model = ChatOpenAI(
     model="gpt-5",
     temperature=0,
-    reasoning_effort="medium",
+    reasoning_effort="low",
     api_key=settings.OPENAI_API_KEY
 )
 
