@@ -32,7 +32,8 @@ export function Sidebar({
   const { confirm, alert } = useDialog();
   const [query, setQuery] = useState("");
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const { filteredChats, loadingChats, chatsError } = useChats(query);
+  const { filteredChats, loadingChats, chatsError, removeChatOptimistic } =
+    useChats(query);
 
   // Confirm, then delete the chat (and its server-side files/namespace) and
   // refresh the list. If the deleted chat is the one open, fall back to a fresh
@@ -49,14 +50,20 @@ export function Sidebar({
       if (!ok) return;
 
       setDeletingId(id);
+      // Optimistic: drop the row instantly so the list doesn't wait on the round
+      // trip (and never flashes a skeleton). Restore it if the delete fails.
+      const rollback = removeChatOptimistic(id);
       try {
         await deleteChat(id);
+        // Re-sync the list (and any project views) — already removed locally, so
+        // this is a silent background refresh, not a visible reload.
         emitChatsChanged();
         if (pathname === `/chat/${id}`) {
           router.push("/chat");
           emitNewChat();
         }
       } catch {
+        rollback();
         await alert({
           title: "Delete failed",
           message: "Couldn't delete the chat. Please try again.",
@@ -65,7 +72,7 @@ export function Sidebar({
         setDeletingId(null);
       }
     },
-    [confirm, alert, pathname, router],
+    [confirm, alert, pathname, router, removeChatOptimistic],
   );
 
   return (

@@ -12,3 +12,4 @@
 **/.env
 **/.claude
 **/.claudeignore
+**/AGENT.md

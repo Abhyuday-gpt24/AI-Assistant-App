@@ -36,12 +36,14 @@ logger = logging.getLogger(__name__)
 
 
 def ingest_document(storage_path: str, original_name: str, content_type: str,
-                    user_id: str, chat_id: str, s3) -> dict:
-    """Convert one uploaded document and embed it into the chat's namespace.
+                    user_id: str, namespace: str, s3) -> dict:
+    """Convert one uploaded document and embed it into the given RAG namespace.
 
     `user_id` still owns the S3 paths (extracted images, saved Markdown) and is
-    kept in chunk metadata; `chat_id` is the Pinecone namespace, so retrieval is
-    scoped to this chat alone."""
+    kept in chunk metadata; `namespace` is the Pinecone namespace the chunks land
+    in — the chat's own id for a standalone chat, or the project's id (shared
+    corpus) for a project chat. The api layer resolves which (see
+    services/namespace.py)."""
     if content_type not in DOC_TYPES:
         # Images aren't ingested — they're sent to the chat model inline.
         return {"storage_path": storage_path, "skipped": True, "reason": "not a document"}
@@ -63,10 +65,10 @@ def ingest_document(storage_path: str, original_name: str, content_type: str,
     md_key = markdown_key(storage_path, user_id)
     upload_bytes(md_key, markdown.encode("utf-8"), "text/markdown", s3)
 
-    # 5) chunk + embed into the per-chat namespace
+    # 5) chunk + embed into the resolved namespace (chat's own, or project-shared)
     chunks = chunk_markdown(markdown, source=original_name, storage_path=storage_path)
     if chunks:
-        store = get_vector_store(namespace=chat_id)
+        store = get_vector_store(namespace=namespace)
         documents = [
             Document(
                 page_content=c["text"],
@@ -76,7 +78,7 @@ def ingest_document(storage_path: str, original_name: str, content_type: str,
                     "storage_path": c["storage_path"],
                     "image_urls": c["image_urls"],
                     "user_id": user_id,
-                    "chat_id": chat_id,
+                    "namespace": namespace,
                 },
             )
             for c in chunks
@@ -110,13 +112,14 @@ async def _update_job(db, user_id: str, storage_path: str, **fields) -> None:
     await db.commit()
 
 
-async def run_ingestion_jobs(files: list[dict], user_id: str, chat_id: str) -> None:
+async def run_ingestion_jobs(files: list[dict], user_id: str, namespace: str) -> None:
     """Background entrypoint: ingest a batch, updating each job's DB status.
 
     Async so it can write status via the app's async DB session, but the heavy
     per-file conversion (sync, blocking) is pushed to a worker thread with
     `asyncio.to_thread` so it doesn't stall the event loop. Failures are
-    isolated per file. `chat_id` is the namespace each file is embedded into.
+    isolated per file. `namespace` is the RAG namespace each file is embedded into
+    (the chat's own id, or the project's shared id — resolved by the caller).
     """
     from src.api.s3_bucket.s3_bucket import get_s3_client
 
@@ -128,7 +131,7 @@ async def run_ingestion_jobs(files: list[dict], user_id: str, chat_id: str) -> N
                 res = await asyncio.to_thread(
                     ingest_document,
                     f["storage_path"], f["original_name"], f["content_type"],
-                    user_id, chat_id, s3,
+                    user_id, namespace, s3,
                 )
                 await _update_job(
                     db, user_id, f["storage_path"],

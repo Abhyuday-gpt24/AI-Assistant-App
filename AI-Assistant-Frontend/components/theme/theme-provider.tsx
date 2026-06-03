@@ -6,7 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
-  useState,
+  useSyncExternalStore,
 } from "react";
 
 export type ThemePreference = "system" | "light" | "dark";
@@ -20,6 +20,10 @@ type ThemeContextValue = {
 };
 
 const STORAGE_KEY = "theme";
+// Same-tab notification: setTheme writes localStorage then dispatches this so the
+// external-store snapshots re-read (the native `storage` event only fires in
+// OTHER tabs). Cross-tab sync still rides the native `storage` event.
+const THEME_EVENT = "theme:changed";
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 function getSystemTheme(): ResolvedTheme {
@@ -42,42 +46,68 @@ function applyTheme(resolved: ResolvedTheme) {
   root.style.colorScheme = resolved;
 }
 
+// ── External store: the theme preference + the resolved theme are browser-only
+// (localStorage + matchMedia). Reading them via useSyncExternalStore (the same
+// approach as AuthProvider) is hydration-safe — the server snapshot is the
+// neutral default, the client reads the real value after hydration WITHOUT a
+// mismatch and WITHOUT a setState-in-effect. Subscribers fire on cross-tab
+// `storage`, same-tab `theme:changed`, and (for resolved) system-scheme changes.
+
+function subscribePreference(callback: () => void) {
+  window.addEventListener("storage", callback);
+  window.addEventListener(THEME_EVENT, callback);
+  return () => {
+    window.removeEventListener("storage", callback);
+    window.removeEventListener(THEME_EVENT, callback);
+  };
+}
+
+function subscribeResolved(callback: () => void) {
+  const mql = window.matchMedia("(prefers-color-scheme: dark)");
+  window.addEventListener("storage", callback);
+  window.addEventListener(THEME_EVENT, callback);
+  mql.addEventListener("change", callback);
+  return () => {
+    window.removeEventListener("storage", callback);
+    window.removeEventListener(THEME_EVENT, callback);
+    mql.removeEventListener("change", callback);
+  };
+}
+
+function getResolvedSnapshot(): ResolvedTheme {
+  const pref = readStoredTheme();
+  return pref === "system" ? getSystemTheme() : pref;
+}
+
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = useState<ThemePreference>("system");
-  const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>("light");
+  // Snapshots return primitives, so React's Object.is comparison is stable.
+  const theme = useSyncExternalStore(
+    subscribePreference,
+    readStoredTheme,
+    () => "system" as ThemePreference,
+  );
+  const resolvedTheme = useSyncExternalStore(
+    subscribeResolved,
+    getResolvedSnapshot,
+    () => "light" as ResolvedTheme,
+  );
 
+  // Reflect the resolved theme onto <html>. A DOM side-effect (the legitimate use
+  // of an effect) — no setState here, so no cascading render. The inline
+  // ThemeScript already set the class pre-hydration; this keeps it in sync on
+  // later changes (toggle / system switch).
   useEffect(() => {
-    const stored = readStoredTheme();
-    setThemeState(stored);
-    const resolved = stored === "system" ? getSystemTheme() : stored;
-    setResolvedTheme(resolved);
-    applyTheme(resolved);
-  }, []);
-
-  useEffect(() => {
-    if (theme !== "system") return;
-    const mql = window.matchMedia("(prefers-color-scheme: dark)");
-    const handler = (event: MediaQueryListEvent) => {
-      const next: ResolvedTheme = event.matches ? "dark" : "light";
-      setResolvedTheme(next);
-      applyTheme(next);
-    };
-    mql.addEventListener("change", handler);
-    return () => mql.removeEventListener("change", handler);
-  }, [theme]);
+    applyTheme(resolvedTheme);
+  }, [resolvedTheme]);
 
   const setTheme = useCallback((next: ThemePreference) => {
-    setThemeState(next);
     if (next === "system") {
       window.localStorage.removeItem(STORAGE_KEY);
-      const resolved = getSystemTheme();
-      setResolvedTheme(resolved);
-      applyTheme(resolved);
     } else {
       window.localStorage.setItem(STORAGE_KEY, next);
-      setResolvedTheme(next);
-      applyTheme(next);
     }
+    // Notify the external store (same tab) → snapshots re-read → re-render.
+    window.dispatchEvent(new Event(THEME_EVENT));
   }, []);
 
   const toggleTheme = useCallback(() => {

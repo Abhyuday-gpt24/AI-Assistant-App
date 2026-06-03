@@ -31,11 +31,40 @@ class User(SQLModel, table=True):
     chats: list["Chat"] = Relationship(back_populates="user")
 
 
+class Project(SQLModel, table=True):
+    """A workspace grouping related chats that SHARE one RAG corpus.
+
+    A project is created up front (name + description) and its `id` becomes the
+    Pinecone namespace for every document uploaded in any of its chats — so all
+    chats in the project retrieve over the same shared knowledge base. (A
+    standalone chat, by contrast, uses its own `chat_id` as the namespace.)
+    Brand-new table, so `create_all` adds it on startup (no migration needed)."""
+    __tablename__ = "projects"
+
+    id: str = Field(default_factory=new_id, primary_key=True)
+    user_id: str = Field(foreign_key="users.id", index=True)
+    name: str
+    description: str = ""
+    created_at: datetime = Field(
+        default_factory=now_utc,
+        sa_column=Column(DateTime(timezone=True))
+    )
+    updated_at: datetime = Field(
+        default_factory=now_utc,
+        sa_column=Column(DateTime(timezone=True))
+    )
+
+
 class Chat(SQLModel, table=True):
     __tablename__ = "chats"
 
     id: str = Field(default_factory=new_id, primary_key=True)
     user_id: str = Field(foreign_key="users.id")
+    # When set, this chat belongs to a project and its RAG namespace is the
+    # PROJECT id (shared across the project's chats) rather than its own chat_id.
+    # Nullable + added to the existing `chats` table via an idempotent ALTER in
+    # app.py's lifespan (create_all does NOT migrate existing tables).
+    project_id: str | None = Field(default=None, foreign_key="projects.id", index=True)
     title: str = "New Chat"
     created_at: datetime = Field(
         default_factory=now_utc,

@@ -6,6 +6,10 @@ export type StreamChatBody = {
   // Omitted for a brand-new chat — the backend creates the Chat row inside
   // POST /chat/stream when chat_id is absent. There is no POST /chats route.
   chat_id?: string;
+  // Set when this is a chat inside a project: on first send the backend creates
+  // the chat under the project so its RAG namespace is the project's shared
+  // corpus. Ignored for an already-persisted chat (the stored value wins).
+  project_id?: string;
   // Files already uploaded to S3 (presigned flow). The backend re-verifies
   // each one exists before streaming. Omitted/empty when nothing is attached.
   attachments?: Attachment[];

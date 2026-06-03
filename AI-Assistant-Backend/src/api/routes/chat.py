@@ -5,9 +5,10 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.db.database import get_db
-from src.api.db.models import User, Chat, Message, ChatAttachment
+from src.api.db.models import User, Chat, Project, Message, ChatAttachment
 from src.api.schemas.schemas import ChatRequest, ChatSummary
 from src.api.deps import get_current_user
+from src.api.services.namespace import resolve_rag_namespace
 from sqlmodel import select
 import base64
 from src.api.services.chat_service import stream_chat
@@ -110,24 +111,42 @@ async def chat_stream(
     #   - does not exist → create it with THIS id (client-supplied), owned by the
     #     caller. (Replaces the old server-generated implicit creation.)
     from fastapi import HTTPException
+
+    # If this chat belongs to a project, validate that project up front: a forged
+    # project id must not be able to scope a new chat onto someone else's shared
+    # namespace. Only matters when we end up CREATING the chat (an existing chat
+    # keeps its stored project_id; the request value is ignored for it).
+    project_id = req.project_id or None
+    if project_id:
+        proj = (await db.execute(
+            select(Project).where(Project.id == project_id, Project.user_id == user.id)
+        )).scalar_one_or_none()
+        if proj is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+
     if req.chat_id:
         result = await db.execute(select(Chat).where(Chat.id == req.chat_id))
         existing = result.scalar_one_or_none()
         if existing is not None:
             if existing.user_id != user.id:
                 raise HTTPException(status_code=404, detail="Chat not found")
-            chat_id = existing.id
+            chat = existing
         else:
-            chat = Chat(id=req.chat_id, user_id=user.id, title=req.message[:50])
+            chat = Chat(id=req.chat_id, user_id=user.id, title=req.message[:50],
+                        project_id=project_id)
             db.add(chat)
             await db.commit()
-            chat_id = chat.id
     else:
         # Legacy path: no client id supplied → server generates one.
-        chat = Chat(user_id=user.id, title=req.message[:50])
+        chat = Chat(user_id=user.id, title=req.message[:50], project_id=project_id)
         db.add(chat)
         await db.commit()
-        chat_id = chat.id
+
+    chat_id = chat.id
+    # RAG namespace: the project's shared corpus for a project chat, else this
+    # chat's own id (resolved from the persisted row, so an existing chat keeps
+    # whichever it already had).
+    rag_namespace = resolve_rag_namespace(chat)
 
     # Save user message
     db.add(Message(chat_id=chat_id, role="user", content=req.message))
@@ -161,7 +180,8 @@ async def chat_stream(
     async def generate():
         yield f"data: {json.dumps({'chat_id': chat_id})}\n\n"
         full_response = ""
-        async for chunk in stream_chat(req.message, chat_id, verified_attachments, user.id):
+        async for chunk in stream_chat(req.message, chat_id, verified_attachments,
+                                       user.id, rag_namespace):
             full_response += json.loads(chunk[6:]).get("delta", "") if "delta" in chunk else ""
             yield chunk
 
@@ -178,8 +198,12 @@ async def chat_stream(
 
 @router.get("/chats")
 async def list_chats(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    # Standalone chats only — project chats are listed under their project
+    # (GET /api/projects/{id}/chats), so the sidebar "Recent" stays uncluttered.
     result = await db.execute(
-        select(Chat).where(Chat.user_id == user.id).order_by(Chat.updated_at.desc())
+        select(Chat)
+        .where(Chat.user_id == user.id, Chat.project_id.is_(None))
+        .order_by(Chat.updated_at.desc())
     )
     chats = result.scalars().all()
     return [ChatSummary(id=c.id, title=c.title, updated_at=str(c.updated_at)) for c in chats]

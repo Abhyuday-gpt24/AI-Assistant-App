@@ -15,12 +15,16 @@ type ChatWindowProps = {
   title: string;
   subtitle?: string;
   chatId?: string;
+  // Set when this window is a chat inside a project: it scopes uploads + the
+  // stream to the project's shared RAG corpus and deep-links to the project URL.
+  projectId?: string;
 };
 
 export function ChatWindow({
   title,
   subtitle,
   chatId: initialChatId,
+  projectId,
 }: ChatWindowProps) {
   const [draft, setDraft] = useState("");
 
@@ -32,8 +36,9 @@ export function ChatWindow({
     chatIdRef,
     persistedRef,
     setMessages,
+    projectId,
   });
-  const uploads = useUploads(chatIdRef);
+  const uploads = useUploads(chatIdRef, projectId);
 
   async function handleSend() {
     const text = draft.trim();

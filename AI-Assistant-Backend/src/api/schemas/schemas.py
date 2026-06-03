@@ -31,6 +31,10 @@ class Attachment(SQLModel):
 class ChatRequest(SQLModel):
     message: str
     chat_id: str | None = None
+    # Set when the chat belongs to a project: on first send the chat row is
+    # created under this project so its RAG namespace becomes the project's
+    # shared corpus. Ignored for an already-persisted chat (the stored value wins).
+    project_id: str | None = None
     attachments: List[Attachment] = []
 
 
@@ -42,15 +46,35 @@ class IngestFile(SQLModel):
     content_type: str
 
 class IngestRequest(SQLModel):
-    # chat_id is the Pinecone namespace the docs get embedded into, so each chat
-    # only ever retrieves its own files. The frontend generates this id for a new
-    # chat before the first message, so it's available at upload time.
+    # The docs get embedded into the chat's resolved RAG namespace. For a
+    # standalone chat that's the chat_id; for a project chat it's the project_id
+    # (shared corpus). The backend resolves it from the persisted chat when the
+    # chat exists, else from project_id (below) when supplied. The frontend
+    # generates chat_id for a new chat before the first message (upload time).
     chat_id: str
+    project_id: str | None = None
     files: List[IngestFile]
 
 class ChatSummary(SQLModel):
     id: str
     title: str
+    updated_at: str
+
+
+# Project schemas
+class ProjectCreateRequest(SQLModel):
+    name: str
+    description: str = ""
+
+class ProjectUpdateRequest(SQLModel):
+    name: str | None = None
+    description: str | None = None
+
+class ProjectSummary(SQLModel):
+    id: str
+    name: str
+    description: str
+    created_at: str
     updated_at: str
 
 

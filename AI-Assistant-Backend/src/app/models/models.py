@@ -7,7 +7,7 @@ from config import settings
 
 #--------------------- Models wihout tools -------------------------
 
-# Deepseek Flash — default synthesizer (general/chit-chat) + query analyzer
+# Deepseek Flash — cheap default synthesizer for the "general" category.
 deepseek_flash_model = ChatDeepSeek(
     model="deepseek-v4-flash",
     temperature=0,
@@ -16,7 +16,7 @@ deepseek_flash_model = ChatDeepSeek(
     reasoning_effort="low",
     )
 
-# Deepseek Pro — strong reasoner; synthesizer tier for math/code categories
+# Deepseek Pro — strong reasoner; primary synthesizer for math/code categories.
 deepseek_pro_model = ChatDeepSeek(
     model="deepseek-v4-pro",
     temperature=0,
@@ -25,7 +25,7 @@ deepseek_pro_model = ChatDeepSeek(
     reasoning_effort="medium",
     )
 
-# Groq GPT OSS 20B
+# Groq GPT OSS 20B — used by the Tavily web-search node (mcp/tavily_search.py).
 groq_gpt_model = ChatGroq(
     model="openai/gpt-oss-20b",
     temperature=0,
@@ -33,7 +33,7 @@ groq_gpt_model = ChatGroq(
     api_key=settings.GROQ_API_KEY
 )
 
-# OpenAI GPT 5 Nano
+# OpenAI GPT-5 Nano — summarizer for the context-management node.
 gpt_5_nano_model = ChatOpenAI(
     model="gpt-5-nano",
     temperature=0,
@@ -42,6 +42,8 @@ gpt_5_nano_model = ChatOpenAI(
     api_key=settings.OPENAI_API_KEY
 )
 
+# OpenAI GPT-5 Mini — reliable structured output; query-analyzer primary +
+# vision-synthesizer fallback.
 gpt_5_mini_model = ChatOpenAI(
     model="gpt-5-mini",
     temperature=0,
@@ -49,51 +51,18 @@ gpt_5_mini_model = ChatOpenAI(
     api_key=settings.OPENAI_API_KEY
 )
 
-gpt_54_mini_model = ChatOpenAI(
-    model="gpt-5.4-mini",
+# OpenAI GPT-5 — strong general model; provider-error fallback for math/code.
+gpt_5_model = ChatOpenAI(
+    model="gpt-5",
     temperature=0,
     reasoning_effort="medium",
     api_key=settings.OPENAI_API_KEY
 )
 
-gpt_54_nano_model = ChatOpenAI(
-    model="gpt-5.4-nano",
-    temperature=0,
-    reasoning_effort="medium",
-    api_key=settings.OPENAI_API_KEY
-)
-
-gpt_54_mini_model = ChatOpenAI(
-    model="gpt-5.4-mini",
-    temperature=0,
-    reasoning_effort="medium",
-    api_key=settings.OPENAI_API_KEY
-)
-
-gpt_54_model = ChatOpenAI(
-    model="gpt-5.4",
-    temperature=0,
-    reasoning_effort="medium",
-    api_key=settings.OPENAI_API_KEY
-)
-
-gpt_55_model = ChatOpenAI(
-    model="gpt-5.5",
-    temperature=0,
-    reasoning_effort="medium",
-    api_key=settings.OPENAI_API_KEY
-)
-
-# Gemini Flash — vision-capable; fallback for the image synthesizer path
+# Gemini 2.5 Flash — vision-capable; image-synthesizer primary + query-analyzer
+# structured-output fallback.
 gemini_flash_model = ChatGoogleGenerativeAI(
-    model="gemini-3.5-flash",
+    model="gemini-2.5-flash",
     api_key=settings.GEMINI_API_KEY,
     temperature=0,
 )
-
-
-
-
-
-
-

@@ -1,7 +1,7 @@
 QUERY_ANALYZER_SYS_PROMPT = """You are the intent router for a general-purpose AI assistant. Classify the user's latest message into one or more intents, choose its category, and produce a search-optimized rewrite of it.
 
 INTENTS:
-- "kb_retrieve" → the answer depends on the user's OWN uploaded documents/files (their personal knowledge base). Choose this whenever the user refers to "my/this/the attached/the uploaded" document, or asks about content that would live in files they provided (e.g. "summarize my report", "what does the contract say about X", "review my resume").
+- "kb_retrieve" → the answer depends on the uploaded documents/files available to this conversation — the user's own uploads in this chat, and (when the chat belongs to a project) the documents shared across that project. Choose this whenever the user refers to "my/this/the attached/the uploaded" document, or asks about content that would live in files they provided (e.g. "summarize my report", "what does the contract say about X", "review my resume").
 - "web_search" → the answer needs live or current information from the internet: recent events, latest versions/releases/changelogs, prices, news, or facts that may have changed since training.
 - "direct" → the assistant can answer on its own with no external data: greetings, chit-chat, general knowledge, explanations, reasoning, math, coding help, writing, and creative tasks.
 
@@ -29,7 +29,7 @@ SYNTHESIZER_AGENT_SYS_PROMPT = """You are a helpful, knowledgeable general-purpo
 
 ## Context you may receive
 Alongside the conversation you may be given any combination of the following (any of them may be empty — ignore empty ones):
-- **Retrieved context** — excerpts from the user's OWN uploaded documents (their personal knowledge base).
+- **Retrieved context** — excerpts from the documents available to this conversation: the user's uploads in this chat, or — for a chat inside a project — documents shared across the project.
 - **Web search results** — current information fetched from the internet.
 - **Attached document(s)** — the text of files the user attached to this turn.
 - **Conversation summary** — a condensed recap of earlier messages.

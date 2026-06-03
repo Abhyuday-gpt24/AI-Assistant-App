@@ -1,5 +1,11 @@
 from src.app.graphs.graph_state import AgentState
-from src.app.models.models import deepseek_flash_model, deepseek_pro_model, gpt_54_mini_model, gpt_54_model, gemini_flash_model
+from src.app.models.models import (
+    deepseek_flash_model,
+    deepseek_pro_model,
+    gpt_5_model,
+    gpt_5_mini_model,
+    gemini_flash_model,
+)
 from src.app.sys_prompts.asistant_sys_prompt import QUERY_ANALYZER_SYS_PROMPT, SYNTHESIZER_AGENT_SYS_PROMPT
 from langchain_core.messages import SystemMessage, HumanMessage
 from pydantic import BaseModel, Field
@@ -13,17 +19,18 @@ MAX_DOC_CHARS = 24000
 # Category → synthesizer model (primary `.with_fallbacks([...])` secondary, so a
 # provider error on the primary auto-retries on the fallback). Image turns bypass
 # this map entirely (handled structurally below — vision model).
-#   math    : deepseek-v4-pro    → gpt-5.4
-#   code    : deepseek-v4-flash  → deepseek-v4-pro
-#   general : deepseek-v4-flash  (default; also the .get() fallback)
+#   math    : deepseek-v4-pro    → gpt-5
+#   code    : deepseek-v4-pro    → gpt-5
+#   general : deepseek-v4-flash  (no fallback; default + the .get() fallback)
 CATEGORY_MODELS = {
-    "math": deepseek_pro_model.with_fallbacks([gpt_54_model]),
-    "code": deepseek_flash_model.with_fallbacks([deepseek_pro_model]),
+    "math": deepseek_pro_model.with_fallbacks([gpt_5_model]),
+    "code": deepseek_pro_model.with_fallbacks([gpt_5_model]),
     "general": deepseek_flash_model,
 }
 
-# Image turns: vision-capable primary → gemini-3.5-flash fallback on provider error.
-VISION_MODEL = gpt_54_mini_model.with_fallbacks([gemini_flash_model])
+# Image turns: gemini-2.5-flash (vision) primary → gpt-5-mini fallback on a
+# provider error.
+VISION_MODEL = gemini_flash_model.with_fallbacks([gpt_5_mini_model])
 
 # Define the structure
 class QueryAnalyzerInterface(BaseModel):
@@ -38,15 +45,16 @@ class QueryAnalyzerInterface(BaseModel):
     )
 
 
-# Analyzer runs every turn and is the critical routing node, so it gets a
-# fallback chain: deepseek-v4-flash → deepseek-v4-pro → gpt-5.4. Each link is the
-# same structured-output runnable, so the {raw, parsed, parsing_error} shape and
-# usage_metadata stay identical no matter which model answers.
-query_analyzer_structured = deepseek_flash_model.with_structured_output(
+# Analyzer runs every turn and is the critical routing node — it needs RELIABLE
+# structured output. DeepSeek was flaky at this and kept falling back (lag + cost),
+# so the analyzer now runs on gpt-5-mini (strong structured output) →
+# gemini-2.5-flash fallback. Each link is the same structured-output runnable, so
+# the {raw, parsed, parsing_error} shape and usage_metadata stay identical no
+# matter which model answers.
+query_analyzer_structured = gpt_5_mini_model.with_structured_output(
     QueryAnalyzerInterface, include_raw=True
 ).with_fallbacks([
-    deepseek_pro_model.with_structured_output(QueryAnalyzerInterface, include_raw=True),
-    gpt_54_model.with_structured_output(QueryAnalyzerInterface, include_raw=True),
+    gemini_flash_model.with_structured_output(QueryAnalyzerInterface, include_raw=True),
 ])
 
 
@@ -120,10 +128,11 @@ async def synthesizer_agent_node(state: AgentState) -> AgentState:
 
     # Model selection is two-layered:
     #  1. STRUCTURAL (deterministic): image turns must use a vision-capable model.
-    #     DeepSeek/Groq are text-only and 400 on image_url blocks ("unknown
-    #     variant image_url, expected text"); GPT-5.x accepts them natively.
-    #  2. CATEGORY (from the analyzer): math/code → strong DeepSeek Pro reasoner,
-    #     general (and any unknown/missing value) → cheap DeepSeek Flash.
+    #     DeepSeek is text-only and 400s on image_url blocks ("unknown variant
+    #     image_url, expected text"); gemini-2.5-flash / gpt-5-mini accept them.
+    #  2. CATEGORY (from the analyzer): math/code → strong DeepSeek Pro reasoner
+    #     (→ gpt-5 fallback), general (and any unknown/missing value) → cheap
+    #     DeepSeek Flash.
     # All models stream identically, so the SSE contract is unchanged.
     if images:
         model = VISION_MODEL
