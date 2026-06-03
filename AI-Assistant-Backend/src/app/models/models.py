@@ -39,7 +39,6 @@ gpt_5_nano_model = ChatOpenAI(
     temperature=0,
     reasoning_effort="low",
     max_tokens=500,
-    reasoning_effort="low",
     api_key=settings.OPENAI_API_KEY
 )
 
