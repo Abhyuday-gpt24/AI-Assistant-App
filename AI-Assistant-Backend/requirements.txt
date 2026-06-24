@@ -13,7 +13,8 @@ python-dotenv
 langchain-mcp-adapters
 langchain-pinecone
 pinecone-client
-langgraph-checkpoint-postgres 
+cohere
+langgraph-checkpoint-postgres
 psycopg[binary]
 sqlmodel
 asyncpg 

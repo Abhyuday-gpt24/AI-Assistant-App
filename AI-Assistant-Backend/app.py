@@ -1,6 +1,5 @@
 from contextlib import asynccontextmanager
 from sqlmodel import SQLModel
-from sqlalchemy import text
 from src.api.db.database import engine
 from src.api.routes.chat import router as chat_router
 from src.api.routes.auth import router as auth_router
@@ -8,7 +7,6 @@ from fastapi import FastAPI
 from sqlalchemy.exc import IntegrityError, OperationalError
 from src.api.routes.file_upload import router as files_router
 from src.api.routes.ingestion import router as ingestion_router
-from src.api.routes.projects import router as projects_router
 from src.api.exceptions import (
     AppException,
     app_exception_handler,
@@ -22,15 +20,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Runs on startup — creates DB tables. create_all only creates MISSING tables
-    # (the new `projects` table), so adding `chats.project_id` to the existing
-    # `chats` table needs an explicit, idempotent ALTER (Postgres supports
-    # ADD COLUMN IF NOT EXISTS). Brand-new installs get the column from create_all.
+    # Runs on startup — creates any MISSING DB tables. create_all does NOT ALTER
+    # existing tables; schema changes to existing tables need manual SQL/Alembic.
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
-        await conn.execute(
-            text("ALTER TABLE chats ADD COLUMN IF NOT EXISTS project_id VARCHAR")
-        )
     yield
 
 
@@ -65,5 +58,4 @@ app.include_router(auth_router, prefix="/api/auth", tags=["Auth"])
 app.include_router(chat_router, prefix="/api", tags=["Chat"])
 app.include_router(files_router, prefix="/api/storage", tags=["Files"])
 app.include_router(ingestion_router, prefix="/api/ingestion", tags=["Ingestion"])
-app.include_router(projects_router, prefix="/api/projects", tags=["Projects"])
 

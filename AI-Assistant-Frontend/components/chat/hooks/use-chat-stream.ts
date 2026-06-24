@@ -22,10 +22,6 @@ type SendArgs = {
 
 type UseChatStreamArgs = ChatIdState & {
   setMessages: Dispatch<SetStateAction<ChatMessage[]>>;
-  // When set, this chat lives in a project: the stream body carries the
-  // project_id (so a new chat is created under the project) and the first-persist
-  // deep-link points at the project-scoped chat URL.
-  projectId?: string;
 };
 
 export type ChatStream = {
@@ -40,7 +36,6 @@ export function useChatStream({
   chatIdRef,
   persistedRef,
   setMessages,
-  projectId,
 }: UseChatStreamArgs): ChatStream {
   const [streaming, setStreaming] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
@@ -61,12 +56,8 @@ export function useChatStream({
       const createdNewChat = !persistedRef.current;
       let receivedChatId = false;
 
-      // Where a freshly-persisted chat's URL should point. Project chats live
-      // under /projects/{projectId}/chat/{id}; standalone chats under /chat/{id}.
-      const chatPath = (id: string) =>
-        projectId
-          ? `/projects/${encodeURIComponent(projectId)}/chat/${id}`
-          : `/chat/${id}`;
+      // Where a freshly-persisted chat's URL should point.
+      const chatPath = (id: string) => `/chat/${id}`;
 
       // The backend echoes the chat id as the stream's first frame. For a new
       // chat this is our own generated id; apply it once to deep-link the URL and
@@ -98,7 +89,6 @@ export function useChatStream({
           {
             message: text,
             chat_id: chatId,
-            project_id: projectId,
             attachments: attachments.length > 0 ? attachments : undefined,
           },
           {
@@ -141,7 +131,7 @@ export function useChatStream({
         setStreaming(false);
       }
     },
-    [chatIdRef, persistedRef, setMessages, projectId],
+    [chatIdRef, persistedRef, setMessages],
   );
 
   return { streaming, send };

@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     DEEPSEEK_API_KEY: str
     GEMINI_API_KEY: str
 
+    # Cohere — used for retrieval re-ranking (rerank-v3.5)
+    COHERE_API_KEY: str
+
 
     # Tavily MCP settings
     TAVILY_MCP_LINK: str
@@ -29,6 +32,11 @@ class Settings(BaseSettings):
     # Vector Store Pinecone settings
     PINECONE_INDEX_NAME: str
     PINECONE_API_KEY: str
+    # Single tenant/company namespace for ALL vectors. Every chunk lands in this
+    # one Pinecone namespace; per-chat isolation is enforced by a `chat_id`
+    # metadata filter at retrieval time (not by separate namespaces). Set this in
+    # .env to your tenant/company id; the default keeps a fresh install booting.
+    PINECONE_NAMESPACE: str = "default-tenant"
 
 
     # Postgres DB settings

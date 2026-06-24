@@ -2,30 +2,34 @@
 attachments exist, list, and delete — each enforcing the per-user ownership gate.
 """
 
-import uuid
-
 from botocore.exceptions import ClientError
 from config import settings
 from src.api.exceptions import AppException, NotFoundError, ForbiddenError
 
 from src.api.services.s3_bucket_service.constants import (
     ALLOWED_TYPES,
-    IMAGE_TYPES,
     MAX_FILES_PER_MESSAGE,
     PRESIGNED_EXPIRY,
-    CATEGORY_EXTRACTED,
 )
 from src.api.services.s3_bucket_service.paths import (
     _user_prefix,
     _owns_path,
-    _doc_uuid,
+    chat_prefix,
+    chat_file_key,
     categorize,
-    markdown_key,
 )
+from src.api.services.s3_bucket_service.byte_io import s3_error
 
 
-def generate_presigned_urls(files_metadata, folder, user_id, s3):
-    """Generate presigned URLs for files that need uploading."""
+def generate_presigned_urls(files_metadata, user_id, chat_id, s3):
+    """Generate presigned PUT URLs for files, scoped to a single chat.
+
+    Keys land at '{user_id}/{chat_id}/{filename}' (the original name is kept).
+    `chat_id` is the client-generated id the frontend mints before the first
+    message, so uploads can be scoped to the chat up front.
+    """
+    if not chat_id:
+        raise AppException(status_code=400, detail="chat_id is required for upload")
     if len(files_metadata) > MAX_FILES_PER_MESSAGE:
         raise AppException(status_code=400, detail=f"Max {MAX_FILES_PER_MESSAGE} files per message")
 
@@ -35,12 +39,11 @@ def generate_presigned_urls(files_metadata, folder, user_id, s3):
 
     urls = []
     for f in files_metadata:
-        ext = f["name"].rsplit(".", 1)[-1] if "." in f["name"] else ""
-        unique_name = f"{uuid.uuid4()}.{ext}" if ext else str(uuid.uuid4())
-        # Scope to the owner AND route by type:
-        #   '{folder}/{user_id}/{images|docs}/{uuid.ext}'
+        # Per-chat key, original filename preserved: '{user_id}/{chat_id}/{name}'.
+        # `category` is no longer a folder — it's just the images/docs hint the
+        # frontend uses to ingest-vs-inline.
         category = categorize(f["content_type"])
-        storage_path = f"{_user_prefix(folder, user_id)}/{category}/{unique_name}"
+        storage_path = chat_file_key(user_id, chat_id, f["name"])
 
         try:
             presigned_url = s3.generate_presigned_url(
@@ -62,7 +65,7 @@ def generate_presigned_urls(files_metadata, folder, user_id, s3):
                 "expires_in": PRESIGNED_EXPIRY,
             })
         except ClientError as e:
-            raise AppException(status_code=502, detail=f"S3 error: {e.response['Error']['Message']}")
+            raise s3_error(e)
 
     return {"urls": urls, "total": len(urls)}
 
@@ -92,19 +95,19 @@ def verify_attachments(attachments, user_id, s3):
         except ClientError as e:
             if e.response["Error"]["Code"] == "404":
                 raise NotFoundError(detail=f"Attachment not found: {attachment['storage_path']}")
-            raise AppException(status_code=502, detail=f"S3 error: {e.response['Error']['Message']}")
+            raise s3_error(e)
 
     return verified
 
 
-def list_files_from_s3(folder, user_id, limit, offset, s3):
+def list_files_from_s3(user_id, limit, offset, s3):
     try:
         # Always scope the listing to this user's prefix so they only see
         # their own files, never the whole bucket.
         kwargs = {
             "Bucket": settings.SUPABASE_BUCKET,
             "MaxKeys": limit,
-            "Prefix": f"{_user_prefix(folder, user_id)}/",
+            "Prefix": f"{_user_prefix(user_id)}/",
         }
 
         response = s3.list_objects_v2(**kwargs)
@@ -125,7 +128,7 @@ def list_files_from_s3(folder, user_id, limit, offset, s3):
         return {"files": files, "total": len(files)}
 
     except ClientError as e:
-        raise AppException(status_code=502, detail=f"S3 error: {e.response['Error']['Message']}")
+        raise s3_error(e)
 
 
 def delete_file_from_s3(file_path, user_id, s3):
@@ -137,7 +140,7 @@ def delete_file_from_s3(file_path, user_id, s3):
     except ClientError as e:
         if e.response["Error"]["Code"] == "404":
             raise NotFoundError(detail=f"File not found: {file_path}")
-        raise AppException(status_code=502, detail=f"S3 error: {e.response['Error']['Message']}")
+        raise s3_error(e)
 
     s3.delete_object(Bucket=settings.SUPABASE_BUCKET, Key=file_path)
     return {"message": "File deleted successfully", "file_path": file_path}
@@ -172,28 +175,13 @@ def _delete_keys(keys, s3):
     return len(keys)
 
 
-def delete_chat_attachments_from_s3(attachments, user_id, s3):
-    """Delete every S3 object tied to a chat's attachments. For each attachment:
-    the source file itself, and — for documents — its converted Markdown plus the
-    whole `extracted/{uuid}/` image folder. Ownership-gated; missing objects are
-    ignored (delete_objects is idempotent). `attachments` is a list of dicts with
-    at least `storage_path` and `content_type`.
+def delete_chat_files_from_s3(user_id, chat_id, s3):
+    """Delete EVERY S3 object under a chat's prefix '{user_id}/{chat_id}/' — the
+    source files, converted Markdown, and extracted images all live there now, so
+    one prefix sweep cleans the chat completely. Ownership-gated by construction
+    (the prefix is the caller's own). Idempotent: an empty prefix deletes nothing.
     """
-    keys = []
-    for att in attachments:
-        path = att.get("storage_path")
-        if not path or not _owns_path(path, user_id):
-            continue  # defensive: never touch another user's keys
-        keys.append(path)
-        # Images aren't ingested → only the source file exists. Documents also
-        # have a saved Markdown sidecar and possibly extracted images.
-        if att.get("content_type") not in IMAGE_TYPES:
-            keys.append(markdown_key(path, user_id))
-            extracted_prefix = (
-                f"{_user_prefix('attachments', user_id)}/"
-                f"{CATEGORY_EXTRACTED}/{_doc_uuid(path)}/"
-            )
-            keys.extend(_list_prefix_keys(extracted_prefix, s3))
-
+    prefix = f"{chat_prefix(user_id, chat_id)}/"
+    keys = _list_prefix_keys(prefix, s3)
     deleted = _delete_keys(keys, s3)
     return {"deleted": deleted}

@@ -90,14 +90,14 @@ type PresignedResponse = {
 };
 
 // Step 2 (NO branch): ask the backend for presigned PUT URLs for files that
-// don't have a storage_path yet. The backend mints a unique, user-scoped,
-// type-routed S3 key (images/ vs docs/) per file.
+// don't have a storage_path yet. The backend mints a per-chat S3 key
+// ('{user_id}/{chat_id}/{filename}') per file, so uploads are scoped to the chat.
 export async function getPresignedUrls(
   files: { name: string; content_type: string }[],
-  folder = "attachments",
+  chatId: string,
 ): Promise<PresignedEntry[]> {
   const res = await apiFetch(
-    `/api/storage/upload/presigned?folder=${encodeURIComponent(folder)}`,
+    `/api/storage/upload/presigned?chat_id=${encodeURIComponent(chatId)}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -129,11 +129,12 @@ export async function uploadToS3(
 }
 
 // Convenience: presign + upload a single file, returning where it landed.
-export async function uploadFile(file: File): Promise<UploadedFile> {
+export async function uploadFile(file: File, chatId: string): Promise<UploadedFile> {
   const contentType = resolveContentType(file);
-  const [entry] = await getPresignedUrls([
-    { name: file.name, content_type: contentType },
-  ]);
+  const [entry] = await getPresignedUrls(
+    [{ name: file.name, content_type: contentType }],
+    chatId,
+  );
   if (!entry) throw new Error("No presigned URL returned for file.");
   await uploadToS3(entry.upload_url, file, entry.content_type);
   return {
@@ -144,16 +145,13 @@ export async function uploadFile(file: File): Promise<UploadedFile> {
 }
 
 // Step 5 trigger: once a document has finished uploading to S3, tell the backend
-// to convert + embed it into this chat's RAG namespace. The backend resolves the
-// namespace: a standalone chat uses its own chat_id (retrieves only its own
-// files); a project chat uses the project's shared corpus. `projectId` is passed
-// so a brand-new project chat (not yet persisted) is seeded into the project
-// namespace before its first message. Runs server-side in a background task, so
-// this returns quickly. Images are skipped (sent inline).
+// to convert + embed it. Every chunk lands in the single tenant namespace tagged
+// with this chat_id, so the chat only ever retrieves its own files. Runs
+// server-side in a background task, so this returns quickly. Images are skipped
+// (sent inline).
 export async function triggerIngestion(
   chatId: string,
   files: { storage_path: string; original_name: string; content_type: string }[],
-  projectId?: string,
 ): Promise<void> {
   if (files.length === 0) return;
   const res = await apiFetch("/api/ingestion/process", {
@@ -161,7 +159,6 @@ export async function triggerIngestion(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       chat_id: chatId,
-      ...(projectId ? { project_id: projectId } : {}),
       files,
     }),
   });

@@ -1,14 +1,13 @@
 import json
 import asyncio
 import logging
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.db.database import get_db
-from src.api.db.models import User, Chat, Project, Message, ChatAttachment
+from src.api.db.models import User, Chat, Message, ChatAttachment
 from src.api.schemas.schemas import ChatRequest, ChatSummary
 from src.api.deps import get_current_user
-from src.api.services.namespace import resolve_rag_namespace
 from sqlmodel import select
 import base64
 from src.api.services.chat_service import stream_chat
@@ -27,7 +26,17 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-async def _attach_doc_markdown(att: dict, user_id: str, s3) -> None:
+async def _ensure_chat_owned(chat_id: str, user_id: str, db: AsyncSession) -> None:
+    """404 unless `chat_id` exists and belongs to `user_id`. 404 (not 403) so we
+    don't leak which ids exist. Shared by the read + delete paths."""
+    result = await db.execute(
+        select(Chat).where(Chat.id == chat_id, Chat.user_id == user_id)
+    )
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+
+async def _attach_doc_markdown(att: dict, s3) -> None:
     """Make a just-attached document's text available to the model.
 
     Fast path: read the Markdown ingestion already saved to S3. Fallback (when
@@ -36,7 +45,7 @@ async def _attach_doc_markdown(att: dict, user_id: str, s3) -> None:
     """
     # Fast path — pre-converted Markdown from the ingestion pipeline.
     try:
-        md_bytes, _ = download_bytes(markdown_key(att["storage_path"], user_id), s3)
+        md_bytes, _ = download_bytes(markdown_key(att["storage_path"]), s3)
         text = md_bytes.decode("utf-8", errors="replace").strip()
         if text:
             att["doc_markdown"] = text
@@ -95,7 +104,7 @@ async def chat_stream(
                 # Documents: make the just-attached file's text available to the
                 # model directly (fast path = pre-converted Markdown; fallback =
                 # convert on the fly), independent of RAG retrieval.
-                await _attach_doc_markdown(att, user.id, s3)
+                await _attach_doc_markdown(att, s3)
 
     # Resolve the chat. The frontend now generates the chat_id client-side (so it
     # can scope RAG ingestion to this chat's namespace before the first message),
@@ -110,20 +119,6 @@ async def chat_stream(
     #     exist.
     #   - does not exist → create it with THIS id (client-supplied), owned by the
     #     caller. (Replaces the old server-generated implicit creation.)
-    from fastapi import HTTPException
-
-    # If this chat belongs to a project, validate that project up front: a forged
-    # project id must not be able to scope a new chat onto someone else's shared
-    # namespace. Only matters when we end up CREATING the chat (an existing chat
-    # keeps its stored project_id; the request value is ignored for it).
-    project_id = req.project_id or None
-    if project_id:
-        proj = (await db.execute(
-            select(Project).where(Project.id == project_id, Project.user_id == user.id)
-        )).scalar_one_or_none()
-        if proj is None:
-            raise HTTPException(status_code=404, detail="Project not found")
-
     if req.chat_id:
         result = await db.execute(select(Chat).where(Chat.id == req.chat_id))
         existing = result.scalar_one_or_none()
@@ -132,21 +127,16 @@ async def chat_stream(
                 raise HTTPException(status_code=404, detail="Chat not found")
             chat = existing
         else:
-            chat = Chat(id=req.chat_id, user_id=user.id, title=req.message[:50],
-                        project_id=project_id)
+            chat = Chat(id=req.chat_id, user_id=user.id, title=req.message[:50])
             db.add(chat)
             await db.commit()
     else:
         # Legacy path: no client id supplied → server generates one.
-        chat = Chat(user_id=user.id, title=req.message[:50], project_id=project_id)
+        chat = Chat(user_id=user.id, title=req.message[:50])
         db.add(chat)
         await db.commit()
 
     chat_id = chat.id
-    # RAG namespace: the project's shared corpus for a project chat, else this
-    # chat's own id (resolved from the persisted row, so an existing chat keeps
-    # whichever it already had).
-    rag_namespace = resolve_rag_namespace(chat)
 
     # Save user message
     db.add(Message(chat_id=chat_id, role="user", content=req.message))
@@ -181,7 +171,7 @@ async def chat_stream(
         yield f"data: {json.dumps({'chat_id': chat_id})}\n\n"
         full_response = ""
         async for chunk in stream_chat(req.message, chat_id, verified_attachments,
-                                       user.id, rag_namespace):
+                                       user.id):
             full_response += json.loads(chunk[6:]).get("delta", "") if "delta" in chunk else ""
             yield chunk
 
@@ -198,11 +188,10 @@ async def chat_stream(
 
 @router.get("/chats")
 async def list_chats(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    # Standalone chats only — project chats are listed under their project
-    # (GET /api/projects/{id}/chats), so the sidebar "Recent" stays uncluttered.
+    # All of the caller's chats, most-recent first (projects were removed).
     result = await db.execute(
         select(Chat)
-        .where(Chat.user_id == user.id, Chat.project_id.is_(None))
+        .where(Chat.user_id == user.id)
         .order_by(Chat.updated_at.desc())
     )
     chats = result.scalars().all()
@@ -215,12 +204,7 @@ async def get_messages(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(
-        select(Chat).where(Chat.id == chat_id, Chat.user_id == user.id)
-    )
-    if not result.scalar_one_or_none():
-        from fastapi import HTTPException
-        raise HTTPException(status_code=404, detail="Chat not found")
+    await _ensure_chat_owned(chat_id, user.id, db)
 
     result = await db.execute(
         select(Message).where(Message.chat_id == chat_id).order_by(Message.created_at)
@@ -237,14 +221,9 @@ async def remove_chat(
     s3=Depends(get_s3_client),
 ):
     """Delete a chat and everything it owns: its messages + attachment records,
-    the uploaded S3 files (source + Markdown + extracted images), the chat's
-    Pinecone namespace, and its LangGraph checkpointer thread. Owner-gated:
-    404 (not 403) for someone else's id so we don't leak which ids exist."""
-    from fastapi import HTTPException
-    result = await db.execute(
-        select(Chat).where(Chat.id == chat_id, Chat.user_id == user.id)
-    )
-    if not result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Chat not found")
-
+    the uploaded S3 files (the whole '{user_id}/{chat_id}/' prefix), the chat's
+    vectors in the tenant namespace, and its LangGraph checkpointer thread.
+    Owner-gated: 404 (not 403) for someone else's id so we don't leak which ids
+    exist."""
+    await _ensure_chat_owned(chat_id, user.id, db)
     return await delete_chat(chat_id, user.id, db, s3)

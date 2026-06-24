@@ -26,12 +26,9 @@ export type UploadsApi = {
 
 // Owns the attachment lifecycle for a chat: validate → presign+PUT to S3 →
 // trigger RAG ingestion for documents → poll ingestion status. `chatIdRef` is
-// always set (client-generated), so ingestion can be namespaced to this chat.
-// `projectId` (when this chat lives in a project) is forwarded so a doc uploaded
-// before the chat's first message still lands in the project's shared corpus.
+// always set (client-generated), so uploads + ingestion are scoped to this chat.
 export function useUploads(
   chatIdRef: React.RefObject<string | undefined>,
-  projectId?: string,
 ): UploadsApi {
   const [uploads, setUploads] = useState<Upload[]>([]);
 
@@ -49,7 +46,7 @@ export function useUploads(
       // StrictMode double-invoke of them is harmless.
       for (const entry of entries) {
         if (entry.status !== "uploading") continue;
-        uploadFile(entry.file)
+        uploadFile(entry.file, chatIdRef.current as string)
           .then((uploaded) => {
             const isDoc = uploaded.category === "docs";
             setUploads((cur) =>
@@ -80,7 +77,6 @@ export function useUploads(
                     content_type: uploaded.contentType,
                   },
                 ],
-                projectId,
               ).catch(() => {
                 // Couldn't even enqueue → mark errored so the chip isn't stuck.
                 setUploads((cur) =>
@@ -102,7 +98,7 @@ export function useUploads(
           });
       }
     },
-    [uploads, chatIdRef, projectId],
+    [uploads, chatIdRef],
   );
 
   const removeAttachment = useCallback((id: string) => {

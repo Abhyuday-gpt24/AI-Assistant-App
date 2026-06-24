@@ -1,17 +1,22 @@
-"""Offline / local bulk RAG ingestion (manual batch job).
+"""Offline / local COMPANY-KB ingestion (manual batch job).
 
-Walks a local directory of source documents, converts each to Markdown with the
-*same* converter the live upload path uses (so PDF/docx/pptx/xlsx/epub/text/html/
-csv are all supported, and vision-extracted images are handled), writes the
-artifacts to S3, and embeds the chunks into a Pinecone namespace.
+Loads **company reference documents** (T&C, policies, handbooks, …) into the
+shared tenant corpus. This is NOT per-user/per-chat upload (that's the live
+`ingestion_service`): every doc here is tagged `source="company"` + a `--topic`
+(e.g. "terms and conditions", "policies"), with **no** user_id/chat_id, so it's
+retrievable by **every** chat (see vector_store.get_company_retriever's
+`source=company` filter). Company docs are **vectors-only** — nothing is written to S3.
 
-Conversion + chunking are fanned out across processes (see `utils/batch_chunker`);
-embedding happens here in the parent, one batch at a time.
+Walks a local directory, converts each file to Markdown with the *same* converter
+the live upload path uses (PDF/docx/pptx/xlsx/epub/text/html/csv), chunks it, and
+embeds the chunks into `settings.PINECONE_NAMESPACE`. Conversion + chunking are
+fanned out across processes (see `utils/batch_chunker`); embedding happens here in
+the parent, one batch at a time.
 
-Run from the project root (so both `src.…` and `config` resolve):
+Run from the project root (so both `src.…` and `config` resolve), once per topic:
 
     python -m src.app.rag_pipeline.data_ingestion.offline_batch_ingestion \\
-        --dir path/to/docs --namespace my-kb [--workers 4] [--batch-size 20]
+        --dir path/to/policies --topic "policies" [--workers 4] [--batch-size 20]
 """
 
 import argparse
@@ -23,7 +28,7 @@ from src.app.rag_pipeline.data_ingestion.utils.batch_chunker import (
     SUPPORTED_EXTENSIONS,
     ingest_files_in_multiprocess,
 )
-from src.app.rag_pipeline.data_ingestion.utils.store_chunks_in_vs import store_chunks
+from src.app.rag_pipeline.data_ingestion.utils.store_chunks_in_vs import store_company_chunks
 from src.app.rag_pipeline.vector_store import get_vector_store
 
 
@@ -38,19 +43,19 @@ def collect_files(dir_path: Path) -> list[str]:
     ]
 
 
-def run_pipeline(doc_paths, namespace, batch_size=20, max_workers=None):
-    """Ingest every supported file under `doc_paths` into the `namespace`."""
+def run_pipeline(doc_paths, topic, batch_size=20, max_workers=None):
+    """Ingest every supported file under `doc_paths` as company KB for `topic`."""
     start = time.time()
 
-    if not namespace:
-        raise ValueError("run_pipeline requires a namespace (the Pinecone / KB id)")
+    if not topic:
+        raise ValueError("run_pipeline requires a topic (the company-doc category)")
 
     file_paths = collect_files(Path(doc_paths))
     if not file_paths:
         print("No supported files found!")
         return
 
-    vector_store = get_vector_store(namespace)
+    vector_store = get_vector_store()
 
     total_files = len(file_paths)
     total_chunks = 0
@@ -63,12 +68,12 @@ def run_pipeline(doc_paths, namespace, batch_size=20, max_workers=None):
         batch_no = i // batch_size + 1
         batch = file_paths[i: i + batch_size]
 
-        # Convert + chunk in parallel across processes.
-        chunks = ingest_files_in_multiprocess(batch, namespace, max_workers=max_workers)
+        # Convert + chunk in parallel across processes (source = path relative to --dir).
+        chunks = ingest_files_in_multiprocess(batch, rel_root=doc_paths, max_workers=max_workers)
 
         # Embed this batch (IO-bound; done in the parent).
         if chunks:
-            store_chunks(chunks, vector_store)
+            store_company_chunks(chunks, vector_store, topic=topic)
             total_chunks += len(chunks)
 
         # Free memory before the next batch.
@@ -82,7 +87,7 @@ def run_pipeline(doc_paths, namespace, batch_size=20, max_workers=None):
     elapsed = time.time() - start
 
     print(f"\n{'='*50}")
-    print(f"  Namespace:   {namespace}")
+    print(f"  Topic:       {topic}")
     print(f"  Files:       {total_files}")
     print(f"  Chunks:      {total_chunks}")
     print(f"  Time:        {elapsed:.1f}s")
@@ -90,13 +95,14 @@ def run_pipeline(doc_paths, namespace, batch_size=20, max_workers=None):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Offline bulk RAG ingestion.")
-    parser.add_argument("--dir", required=True, help="Directory of source documents")
-    parser.add_argument("--namespace", required=True, help="Pinecone namespace / KB id")
+    parser = argparse.ArgumentParser(description="Offline company-KB ingestion.")
+    parser.add_argument("--dir", required=True, help="Directory of company documents")
+    parser.add_argument("--topic", required=True,
+                        help="Topic/category tagged on every doc (e.g. 'policies', 'terms and conditions', 'nextjs', 'FastAPI' etc.)")
     parser.add_argument("--batch-size", type=int, default=20)
     parser.add_argument("--workers", type=int, default=None, help="Process count (default: CPU count)")
     args = parser.parse_args()
-    run_pipeline(args.dir, args.namespace, args.batch_size, args.workers)
+    run_pipeline(args.dir, args.topic, args.batch_size, args.workers)
 
 
 if __name__ == "__main__":

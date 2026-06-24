@@ -28,8 +28,7 @@ async def delete_chat_thread(thread_id: str) -> None:
 
 async def stream_chat(message: str, thread_id: str,
                       attachments: list[dict] | None = None,
-                      user_id: str | None = None,
-                      rag_namespace: str | None = None):
+                      user_id: str | None = None):
     config = {"configurable": {"thread_id": thread_id}}
     # The user turn stays CLEAN (text only) so the query-analyzer node sees just
     # the request, never the attached file. Attachments ride in their own state
@@ -39,17 +38,16 @@ async def stream_chat(message: str, thread_id: str,
     input_data = {
         "messages": [HumanMessage(content=message)],
         "attachments": attachments or [],
-        "retrieval_result": "",
+        "user_docs_result": "",
+        "company_kb_result": "",
         "web_search_result": "",
         "intent": "",
         "query": message,
         "rewritten_query": "",
         "user_id": user_id or "",
-        # thread_id IS the chat_id (conversation identity / checkpointer key).
+        # thread_id IS the chat_id — conversation identity / checkpointer key AND
+        # the RAG scope (retrieval filters the tenant namespace by this chat_id).
         "chat_id": thread_id,
-        # RAG namespace: the project's shared corpus for a project chat, else this
-        # chat's own id. Defaults to the chat_id so standalone chats are unchanged.
-        "rag_namespace": rag_namespace or thread_id,
     }
 
     try:

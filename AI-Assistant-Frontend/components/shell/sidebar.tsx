@@ -9,7 +9,6 @@ import { emitChatsChanged, emitNewChat } from "@/lib/events";
 import { useDialog } from "@/components/ui/dialog";
 import { PlusIcon, SearchIcon } from "@/components/ui/icons";
 import { SidebarHeader } from "./sidebar/sidebar-header";
-import { ProjectsSection } from "./sidebar/projects-section";
 import { SidebarFooter } from "./sidebar/sidebar-footer";
 import { ChatList } from "./sidebar/chat-list";
 import { useChats } from "./sidebar/use-chats";
@@ -55,8 +54,8 @@ export function Sidebar({
       const rollback = removeChatOptimistic(id);
       try {
         await deleteChat(id);
-        // Re-sync the list (and any project views) — already removed locally, so
-        // this is a silent background refresh, not a visible reload.
+        // Re-sync the list — already removed locally, so this is a silent
+        // background refresh, not a visible reload.
         emitChatsChanged();
         if (pathname === `/chat/${id}`) {
           router.push("/chat");
@@ -124,12 +123,6 @@ export function Sidebar({
             <span className={cn(collapsed && "md:hidden")}>New chat</span>
           </Link>
         </div>
-
-        <ProjectsSection
-          collapsed={collapsed}
-          activePath={pathname}
-          onCloseMobile={onCloseMobile}
-        />
 
         <div className={cn("px-2 pt-3 pb-2", collapsed && "md:hidden")}>
           <label className="relative block">

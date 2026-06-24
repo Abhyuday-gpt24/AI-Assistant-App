@@ -56,6 +56,7 @@ def chunk_markdown(text: str, source: str, storage_path: str = "") -> list[dict]
         raw_id = f"{source}::{i}::{chunk_text[:100]}"
         results.append({
             "chunk_id": hashlib.md5(raw_id.encode()).hexdigest(),
+            "chunk_index": len(results),
             "text": chunk_text,
             "source": source,
             "heading_trail": heading_trail,

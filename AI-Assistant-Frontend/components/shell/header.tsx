@@ -1,12 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { LogoutIcon, MenuIcon } from "@/components/ui/icons";
 import { logout } from "@/lib/api/auth";
 import { useAuth } from "@/components/auth/auth-provider";
-import { useProjectName } from "@/components/projects/use-project-name";
 
 type HeaderProps = {
   onOpenMobile: () => void;
@@ -14,14 +13,8 @@ type HeaderProps = {
 
 export function Header({ onOpenMobile }: HeaderProps) {
   const router = useRouter();
-  const pathname = usePathname();
   const { setUser } = useAuth();
   const [signingOut, setSigningOut] = useState(false);
-
-  // Title shows the PROJECT name when we're inside a project (its detail page or
-  // any of its chats: /projects/{id}...); standalone chats show nothing.
-  const projectId = pathname.match(/^\/projects\/([^/]+)/)?.[1];
-  const title = useProjectName(projectId);
 
   async function handleSignOut() {
     if (signingOut) return;
@@ -45,9 +38,6 @@ export function Header({ onOpenMobile }: HeaderProps) {
       >
         <MenuIcon className="h-5 w-5" />
       </button>
-      {title && (
-        <h1 className="truncate text-sm font-semibold">{title}</h1>
-      )}
       <div className="ml-auto flex items-center gap-2">
         <ThemeToggle />
         <button

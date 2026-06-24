@@ -26,7 +26,9 @@ from src.api.services.s3_bucket_service.paths import (
     categorize,
     build_public_url,
     _owns_path,
-    _doc_uuid,
+    chat_prefix,
+    chat_file_key,
+    file_id_for,
     markdown_key,
     extracted_image_key,
 )
@@ -35,7 +37,7 @@ from src.api.services.s3_bucket_service.operations import (
     verify_attachments,
     list_files_from_s3,
     delete_file_from_s3,
-    delete_chat_attachments_from_s3,
+    delete_chat_files_from_s3,
 )
 from src.api.services.s3_bucket_service.byte_io import (
     download_bytes,
@@ -58,7 +60,9 @@ __all__ = [
     "categorize",
     "build_public_url",
     "_owns_path",
-    "_doc_uuid",
+    "chat_prefix",
+    "chat_file_key",
+    "file_id_for",
     "markdown_key",
     "extracted_image_key",
     # operations
@@ -66,7 +70,7 @@ __all__ = [
     "verify_attachments",
     "list_files_from_s3",
     "delete_file_from_s3",
-    "delete_chat_attachments_from_s3",
+    "delete_chat_files_from_s3",
     # byte_io
     "download_bytes",
     "upload_bytes",

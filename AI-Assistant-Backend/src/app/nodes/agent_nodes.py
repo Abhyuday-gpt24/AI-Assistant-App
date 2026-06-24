@@ -34,8 +34,8 @@ VISION_MODEL = gemini_flash_model.with_fallbacks([gpt_5_mini_model])
 
 # Define the structure
 class QueryAnalyzerInterface(BaseModel):
-    intent: list[Literal["direct", "kb_retrieve", "web_search"]] = Field(
-        description='List of intents: ["kb_retrieve"], ["web_search"], ["direct"], or ["kb_retrieve","web_search"] for parallel retrieval. "direct" is never combined with others.'
+    intent: list[Literal["direct", "user_docs", "company_kb", "web_search"]] = Field(
+        description='List of intents. "direct" = answer alone (used ALONE). "user_docs" = the user\'s OWN uploaded files in this chat. "company_kb" = the shared company knowledge base (policies/T&C/handbook/etc.). "web_search" = live internet info. user_docs / company_kb / web_search MAY be combined (e.g. ["user_docs","company_kb"] to compare the user\'s file against company policy); "direct" is never combined.'
     )
     rewritten_query: str = Field(
         description="Search-optimized rewrite of user query. For 'direct' intent, keep original as-is."
@@ -80,21 +80,29 @@ async def query_analyzer_node(state: AgentState) -> AgentState:
         "intent": result.intent,
         "rewritten_query": result.rewritten_query,
         "category": result.category,
-        "retrieval_result": "",
+        "user_docs_result": "",
+        "company_kb_result": "",
         "web_search_result": "",
         "input_tokens": token_count
     }
 
 
 async def synthesizer_agent_node(state: AgentState) -> AgentState:
-    kb = state.get("retrieval_result", "")
+    user_docs = state.get("user_docs_result", "")
+    company_kb = state.get("company_kb_result", "")
     web = state.get("web_search_result", "")
 
     summary = state.get("summary", "")
     attachments = state.get("attachments") or []
 
     sys_prompt = SYNTHESIZER_AGENT_SYS_PROMPT
-    sys_prompt += f"\n\nRetrieved context:\n{kb}\n\nWeb search results:\n{web}"
+    # Only append non-empty context sections so the model isn't handed empty headers.
+    if user_docs:
+        sys_prompt += f"\n\nYour uploaded documents (this chat):\n{user_docs}"
+    if company_kb:
+        sys_prompt += f"\n\nCompany knowledge base:\n{company_kb}"
+    if web:
+        sys_prompt += f"\n\nWeb search results:\n{web}"
     if summary:
         sys_prompt += f"\n\nPrevious conversation summary:\n{summary}"
 

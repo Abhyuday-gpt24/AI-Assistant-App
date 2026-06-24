@@ -23,6 +23,17 @@ OCR_PROMPT = (
     "the page. If the page is blank, return an empty string."
 )
 
+# Used to fold a single extracted figure's content into text when there's no S3
+# to store the image itself (the offline company-KB path). Transcribes any text
+# AND briefly describes the figure, so a chart/diagram isn't lost entirely.
+IMAGE_DESCRIBE_PROMPT = (
+    "You are an OCR + figure-description engine looking at ONE image. "
+    "Transcribe ALL legible text verbatim. If it is a chart, diagram, table, "
+    "screenshot, or photo, also add one concise sentence describing what it "
+    "shows. Return plain text only — no markdown, no preamble. If the image is "
+    "purely decorative (logo, icon, divider, blank), return an empty string."
+)
+
 
 def _gemini():
     from langchain_google_genai import ChatGoogleGenerativeAI
@@ -33,6 +44,29 @@ def _gemini():
         api_key=settings.GEMINI_API_KEY,
         temperature=0,
     )
+
+
+def describe_image(data: bytes, content_type: str = "image/png") -> str:
+    """Best-effort OCR + one-line description of a SINGLE image, as plain text.
+
+    Used by the offline company-KB pipeline (no S3): instead of dropping an
+    extracted figure, its text + a short description are folded into the chunk
+    so the content isn't lost. Returns "" on any failure or for a decorative /
+    empty image, so a bad image never aborts ingestion.
+    """
+    import base64
+    from langchain_core.messages import HumanMessage
+
+    try:
+        b64 = base64.b64encode(data).decode("ascii")
+        message = HumanMessage(content=[
+            {"type": "text", "text": IMAGE_DESCRIBE_PROMPT},
+            {"type": "image_url",
+             "image_url": {"url": f"data:{content_type};base64,{b64}"}},
+        ])
+        return (_gemini().invoke([message]).content or "").strip()
+    except Exception:
+        return ""
 
 
 def convert_pdf_with_vision(data: bytes, filename: str) -> tuple[str, list[dict]]:

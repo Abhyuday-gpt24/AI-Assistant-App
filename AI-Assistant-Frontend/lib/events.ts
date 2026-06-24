@@ -20,12 +20,3 @@ export const NEW_CHAT_EVENT = "chat:new";
 export function emitNewChat() {
   window.dispatchEvent(new Event(NEW_CHAT_EVENT));
 }
-
-// Fired after a project is created, renamed, or deleted so the sidebar's
-// ProjectsSection (and the /projects grid) can refresh their lists. Same
-// publish/subscribe shape as chats:changed, kept here as the shared contract.
-export const PROJECTS_CHANGED_EVENT = "projects:changed";
-
-export function emitProjectsChanged() {
-  window.dispatchEvent(new Event(PROJECTS_CHANGED_EVENT));
-}

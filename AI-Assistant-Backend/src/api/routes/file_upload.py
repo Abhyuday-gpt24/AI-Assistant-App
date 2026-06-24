@@ -1,5 +1,4 @@
 from fastapi import APIRouter, Depends, Query, Body
-from typing import Optional
 from src.api.s3_bucket.s3_bucket import get_s3_client
 from src.api.deps import get_current_user
 from src.api.db.models import User
@@ -19,13 +18,13 @@ async def get_presigned_urls(
         ...,
         example=[{"name": "report.pdf", "content_type": "application/pdf"}],
     ),
-    folder: Optional[str] = Query("attachments"),
+    chat_id: str = Query(..., description="Client-generated chat id the files belong to"),
     user: User = Depends(get_current_user),
     s3=Depends(get_s3_client),
 ):
-    """Frontend calls this when user attaches files that don't have a URL yet.
-    Keys are scoped to the caller: '{folder}/{user_id}/{uuid.ext}'."""
-    return generate_presigned_urls(files_metadata, folder, user.id, s3)
+    """Frontend calls this when the user attaches files that don't have a URL yet.
+    Keys are scoped to the caller AND the chat: '{user_id}/{chat_id}/{filename}'."""
+    return generate_presigned_urls(files_metadata, user.id, chat_id, s3)
 
 
 @router.post("/attachments/verify", tags=["Files"])
@@ -45,13 +44,12 @@ async def verify_files(
 
 @router.get("/files", tags=["Files"])
 async def list_files(
-    folder: Optional[str] = Query("attachments"),
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     user: User = Depends(get_current_user),
     s3=Depends(get_s3_client),
 ):
-    return list_files_from_s3(folder, user.id, limit, offset, s3)
+    return list_files_from_s3(user.id, limit, offset, s3)
 
 
 @router.delete("/files", tags=["Files"])
