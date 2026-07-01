@@ -1,5 +1,6 @@
 import json
 import logging
+import random
 from langchain_core.messages import HumanMessage
 from contextlib import asynccontextmanager
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
@@ -10,6 +11,49 @@ from config import settings
 logger = logging.getLogger(__name__)
 
 DB_URI = settings.SUPABASE_DB_URL
+
+
+# Ephemeral "thinking" statuses streamed WHILE the graph works, before the answer
+# tokens arrive. Emitted once per node as it first runs, so they reflect what the
+# agent is ACTUALLY doing (only "Searching the web…" if web search really ran).
+# Sent as {"status": …} SSE frames; the frontend shows the latest and clears it
+# when the first answer delta arrives. Several variants per stage for personality.
+_STATUS_OPENERS = [
+    "🤔 Hmm, let me think…",
+    "💭 Thinking this through…",
+    "🤔 Got it — one sec…",
+]
+_NODE_STATUS = {
+    "query_analyzer_node": [
+        "🧐 Clarifying your query…",
+        "🧐 Got your point!",
+        "🧐 Making sense of that…",
+    ],
+    "user_docs_retrieval_node": [
+        "📄 Digging through your documents…",
+        "📄 Skimming your files…",
+        "📄 Checking your uploads…",
+    ],
+    "nextjs_docs_retrieval_node": [
+        "📚 Collecting related Next.js docs…",
+        "📚 Flipping through the Next.js docs…",
+        "📚 Pulling up the relevant docs…",
+    ],
+    "web_search_node": [
+        "🌐 Searching the web…",
+        "🌐 Scouting the web…",
+        "🌐 Looking that up online…",
+    ],
+    "synthesizer_agent_node": [
+        "✍️ Writing your answer…",
+        "✍️ Putting it together…",
+        "✍️ Drafting a reply…",
+    ],
+}
+
+
+def _status_frame(message: str) -> str:
+    return f"data: {json.dumps({'status': message})}\n\n"
 
 
 async def delete_chat_thread(thread_id: str) -> None:
@@ -57,13 +101,24 @@ async def stream_chat(message: str, thread_id: str,
             await checkpointer.setup()
             graph = uncompiled_graph.compile(checkpointer=checkpointer)
 
+            # Immediate feedback the instant the stream opens, before the graph
+            # has produced anything.
+            yield _status_frame(random.choice(_STATUS_OPENERS))
+
+            seen_nodes: set[str] = set()
             async for event in graph.astream_events(input_data, config=config, version="v2"):
-                if event["event"] == "on_chat_model_stream":
-                    node = event.get("metadata", {}).get("langgraph_node", "")
-                    if node == "synthesizer_agent_node":
-                        chunk = event["data"]["chunk"]
-                        if hasattr(chunk, "content") and chunk.content:
-                            yield f"data: {json.dumps({'delta': chunk.content})}\n\n"
+                node = event.get("metadata", {}).get("langgraph_node", "")
+
+                # First time each node runs, surface a playful status for it. Runs
+                # in graph order; parallel branches emit their lines as they start.
+                if node in _NODE_STATUS and node not in seen_nodes:
+                    seen_nodes.add(node)
+                    yield _status_frame(random.choice(_NODE_STATUS[node]))
+
+                if event["event"] == "on_chat_model_stream" and node == "synthesizer_agent_node":
+                    chunk = event["data"]["chunk"]
+                    if hasattr(chunk, "content") and chunk.content:
+                        yield f"data: {json.dumps({'delta': chunk.content})}\n\n"
             yield "data: [DONE]\n\n"
     except Exception as e:
         yield f"data: {json.dumps({'error': str(e)})}\n\n"

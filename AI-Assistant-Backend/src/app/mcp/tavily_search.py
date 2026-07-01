@@ -1,7 +1,6 @@
 
 # For MCP Server
 from langchain_mcp_adapters.client import MultiServerMCPClient
-from src.app.models.models import groq_gpt_model
 from src.app.graphs.graph_state import AgentState
 from config import settings
 from langsmith import traceable

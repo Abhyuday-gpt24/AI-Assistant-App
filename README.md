@@ -67,6 +67,7 @@ Intents can run **in parallel** (e.g. check *your* uploaded component against th
 | **Per-conversation memory** | LangGraph `AsyncPostgresSaver` checkpointer keyed on `chat_id`, so each thread remembers its own context. |
 | **Retrieval-augmented generation** | Documents chunked and embedded into Pinecone; retrieval returns a broad candidate pool, then **Cohere `rerank-v3.5`** keeps only chunks above a relevance threshold (adaptive top-k, not fixed). |
 | **Content-aware ingestion** | PDFs are profiled (chars/page, images/page, tables, columns) to choose a fast text path (`pymupdf4llm`) or a **Gemini vision** path for scanned/complex docs; Office docs via `markitdown` (+ LibreOffice→vision for image-first files). |
+| **Query-aware attachments** | Attach a doc and ask about *any* part of it — large files are chunked and reranked against the question so the relevant excerpts (not just page 1) reach the model on the same turn; follow-ups retrieve the whole doc via RAG. |
 | **Multi-model routing** | Per-turn model selection: vision model for images, stronger models for math/code, fast model for general chat — with provider fallbacks that fire only on errors. |
 | **Direct-to-S3 uploads** | Presigned PUT URLs — bytes never pass through the backend. Files are scoped to `{user_id}/{chat_id}/`. |
 | **Web search** | Live results via **Tavily** through the Model Context Protocol (MCP). |
@@ -106,7 +107,7 @@ Intents can run **in parallel** (e.g. check *your* uploaded component against th
 
 **Content-aware document routing.** A scanned PDF and a digital PDF are the same MIME type but need completely different handling. The classifier profiles the actual bytes to decide between a fast text path and a vision-LLM path, with graceful fallbacks when optional tooling (e.g. LibreOffice) is missing.
 
-**Attachments without replay bloat.** A just-uploaded document's converted Markdown is injected into the synthesizer's prompt for the current turn only; follow-up questions rely on RAG retrieval over the chat's corpus, so context doesn't balloon every turn. Images are inlined to a vision model as base64.
+**Query-aware attachments (not just the first pages).** When a document is attached, small files go into the synthesizer's prompt whole, but a large file is chunked and **Cohere-reranked against the current question** — the most-relevant excerpts are packed to a token budget (in document order), so "what does section 12 say?" works on the *same* turn, before async indexing finishes, instead of the model only seeing the opening pages. Huge docs are first narrowed by a cheap lexical pre-filter to stay under the reranker's per-call limit while keeping whole-document coverage. Two levers make retrieval reliable on follow-ups: attaching a doc **forces** the `user_docs` retrieval branch, and a `has_user_docs` flag **nudges** the analyzer to route later content questions to the doc (it otherwise only sees clean text and can't tell a file was uploaded earlier). The attachment context is set fresh per turn, so it never replays or balloons. Images are inlined to a vision model as base64.
 
 **Streaming that stays in sync.** Only the synthesizer node's output streams to the client; the SSE frame shapes (`chat_id` / `delta` / `[DONE]` / `error`) are defined once and parsed by a matching client reader — a deliberately small, tested contract.
 

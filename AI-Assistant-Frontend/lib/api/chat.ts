@@ -16,28 +16,35 @@ export type StreamChatOptions = {
   // Fired when the backend announces the (possibly newly created) chat id as
   // the first frame of the stream — lets the caller deep-link before content.
   onChatId?: (chatId: string) => void;
+  // Fired for ephemeral "thinking" status lines the backend emits while the
+  // agent works (e.g. "🌐 Searching the web…"), before the answer streams.
+  onStatus?: (status: string) => void;
   onDone?: () => void;
   signal?: AbortSignal;
 };
 
 // The backend stream emits these JSON frame shapes over the SSE stream:
 //   {"chat_id": "..."} — id of the (possibly new) chat, sent as the first frame
+//   {"status": "..."}  — an ephemeral "thinking" line shown before the answer
 //   {"delta": "..."}   — an incremental slice of the assistant's reply
 //   {"error": "..."}   — the stream failed server-side (terminal)
 // plus a bare "[DONE]" sentinel (handled by the caller). Parse a content frame
-// into its delta text, surface a chat id, or signal an error to be thrown.
+// into its delta text, surface a chat id / status, or signal an error to throw.
 function parseFrame(
   payload: string,
-): { text: string; chatId?: string; error?: string } {
+): { text: string; chatId?: string; error?: string; status?: string } {
   try {
     const parsed = JSON.parse(payload) as {
       delta?: unknown;
       chat_id?: unknown;
       error?: unknown;
+      status?: unknown;
     };
     if (typeof parsed.error === "string") return { text: "", error: parsed.error };
     if (typeof parsed.chat_id === "string")
       return { text: "", chatId: parsed.chat_id };
+    if (typeof parsed.status === "string")
+      return { text: "", status: parsed.status };
     if (typeof parsed.delta === "string") return { text: parsed.delta };
   } catch {
     // not JSON — treat the raw payload as text (defensive fallback)
@@ -47,7 +54,7 @@ function parseFrame(
 
 export async function streamChat(
   body: StreamChatBody,
-  { onChunk, onChatId, onDone, signal }: StreamChatOptions,
+  { onChunk, onChatId, onStatus, onDone, signal }: StreamChatOptions,
 ): Promise<void> {
   const res = await apiFetch("/api/chat/stream", {
     method: "POST",
@@ -83,6 +90,8 @@ export async function streamChat(
         if (frame.error) throw new Error(frame.error);
         if (frame.chatId !== undefined) {
           onChatId?.(frame.chatId);
+        } else if (frame.status !== undefined) {
+          onStatus?.(frame.status);
         } else {
           onChunk(frame.text);
         }

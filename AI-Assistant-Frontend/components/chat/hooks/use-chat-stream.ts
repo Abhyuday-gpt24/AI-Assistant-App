@@ -13,6 +13,7 @@ import type { Attachment } from "@/lib/api/uploads";
 import type { ChatMessage, MessageAttachment } from "../types";
 import { createMessagePair } from "../messages";
 import type { ChatIdState } from "./use-chat-id";
+import { usePacedStatus } from "./use-paced-status";
 
 type SendArgs = {
   text: string;
@@ -26,6 +27,9 @@ type UseChatStreamArgs = ChatIdState & {
 
 export type ChatStream = {
   streaming: boolean;
+  // Ephemeral "thinking" line for the in-flight turn (e.g. "🌐 Searching the
+  // web…"); "" when idle or once answer tokens start arriving.
+  status: string;
   send: (args: SendArgs) => Promise<void>;
 };
 
@@ -38,6 +42,7 @@ export function useChatStream({
   setMessages,
 }: UseChatStreamArgs): ChatStream {
   const [streaming, setStreaming] = useState(false);
+  const { status, push: pushStatus, reset: resetStatus } = usePacedStatus();
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -83,6 +88,8 @@ export function useChatStream({
       const controller = new AbortController();
       abortRef.current = controller;
       setStreaming(true);
+      resetStatus();
+      let statusCleared = false;
 
       try {
         await streamChat(
@@ -94,7 +101,14 @@ export function useChatStream({
           {
             signal: controller.signal,
             onChatId: applyChatId,
+            onStatus: pushStatus,
             onChunk: (chunk) => {
+              // First real token — drop the "thinking" line so the answer shows
+              // (and stop the paced-status queue/timers for this turn).
+              if (!statusCleared) {
+                statusCleared = true;
+                resetStatus();
+              }
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === assistantId
@@ -129,10 +143,11 @@ export function useChatStream({
           abortRef.current = null;
         }
         setStreaming(false);
+        resetStatus();
       }
     },
-    [chatIdRef, persistedRef, setMessages],
+    [chatIdRef, persistedRef, setMessages, pushStatus, resetStatus],
   );
 
-  return { streaming, send };
+  return { streaming, status, send };
 }

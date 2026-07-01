@@ -7,10 +7,12 @@ export function MessageBubble({
   message,
   flash,
   streaming,
+  status,
 }: {
   message: ChatMessage;
   flash: boolean;
   streaming: boolean;
+  status?: string;
 }) {
   const isUser = message.role === "user";
   return (
@@ -45,7 +47,7 @@ export function MessageBubble({
         )}
       >
         {streaming ? (
-          <TypingDots />
+          <StreamingIndicator status={status} />
         ) : isUser ? (
           <UserMessageBody message={message} />
         ) : (
@@ -78,6 +80,21 @@ function UserMessageBody({ message }: { message: ChatMessage }) {
         <span className="block whitespace-pre-wrap">{message.content}</span>
       )}
     </div>
+  );
+}
+
+// While the assistant bubble is empty, show either a bare typing indicator or
+// the current "thinking" status line (e.g. "🌐 Searching the web…") with dots.
+function StreamingIndicator({ status }: { status?: string }) {
+  if (!status) return <TypingDots />;
+  return (
+    <span
+      className="inline-flex items-center gap-2 py-0.5 text-muted-foreground"
+      aria-live="polite"
+    >
+      <span className="animate-pulse">{status}</span>
+      <TypingDots />
+    </span>
   );
 }
 

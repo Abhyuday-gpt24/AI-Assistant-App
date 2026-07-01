@@ -21,20 +21,23 @@ def _query(state: AgentState) -> str:
 
 
 def _format(docs, origin: str) -> str:
-    """Format hits into source-attributed text. `origin` is "user" or "nextjs";
-    the bracketed label lets the synthesizer cite the right source."""
+    """Format hits into source-attributed text. `origin` is "user" or "nextjs".
+    Each chunk is prefixed with a COMPACT bracketed source tag (topic + filename)
+    the synthesizer uses to build citations — not to echo verbatim.
+
+    The heading trail is deliberately kept OUT of the tag: it already prefixes the
+    chunk body (see `chunk_markdown`), so repeating it in the tag only caused the
+    model to leak `[... > heading]` lines into replies."""
     blocks = []
     for d in docs:
         meta = d.metadata or {}
         name = meta.get("filename") or meta.get("source", "document")
-        trail = meta.get("heading_trail")
         if origin == "nextjs":
             topic = meta.get("topic")
             label = f"Next.js Docs · {topic} · {name}" if topic else f"Next.js Docs · {name}"
         else:
             label = f"Your upload · {name}"
-        header = f"{label} > {trail}" if trail else label
-        blocks.append(f"[{header}]\n{d.page_content}")
+        blocks.append(f"[{label}]\n{d.page_content}")
     return "\n\n".join(blocks)
 
 

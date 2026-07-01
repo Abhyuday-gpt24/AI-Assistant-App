@@ -82,7 +82,9 @@ def get_vector_store():
 # How many candidates to pull from the vector store BEFORE re-ranking. The
 # embedding step casts a wide net (recall); Cohere then re-ranks down to the
 # final top-k in the retrieval node (precision). See rag_pipeline/reranker.py.
-RERANK_CANDIDATES = 20
+# Lowered 20→10 to cut retrieval latency (smaller Pinecone pull + Cohere rerank
+# payload); raise it back if recall on broad queries suffers.
+RERANK_CANDIDATES = 10
 
 
 def _build_retriever(filter_dict: dict, cache_key: str, k: int):

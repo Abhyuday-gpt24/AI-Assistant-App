@@ -24,7 +24,7 @@ export function ChatWindow({
   const { messages, setMessages, loadingHistory, historyError } =
     useChatHistory(initialChatId);
   const { scrollRef, flashId, jumpTo } = useChatScroll(messages);
-  const { streaming, send } = useChatStream({
+  const { streaming, status, send } = useChatStream({
     chatIdRef,
     persistedRef,
     setMessages,
@@ -44,6 +44,13 @@ export function ChatWindow({
     await send({ text, attachments, bubbleAttachments });
   }
 
+  // A suggestion chip on the empty state sends its question straight away.
+  async function handlePick(question: string) {
+    if (streaming || loadingHistory || uploads.hasUploading) return;
+    setDraft("");
+    await send({ text: question, attachments: [], bubbleAttachments: [] });
+  }
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="relative flex min-h-0 flex-1">
@@ -58,7 +65,7 @@ export function ChatWindow({
             ) : historyError ? (
               <HistoryError message={historyError} />
             ) : messages.length === 0 ? (
-              <EmptyState />
+              <EmptyState onPick={handlePick} />
             ) : (
               <ul className="space-y-5">
                 {messages.map((message) => (
@@ -71,6 +78,7 @@ export function ChatWindow({
                         message.role === "assistant" &&
                         message.content === ""
                       }
+                      status={status}
                     />
                   </li>
                 ))}

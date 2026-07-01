@@ -10,6 +10,34 @@ KEEP_LAST_N_IN_SUMMARIZATION = 7
 KEEP_LAST_N_IN_TRUNCATION = 5
 SUMMARIZATION_WORD_LIMIT = 1000
 max_chars = 250
+CHARS_PER_TOKEN = 4  # rough English average, for the fallback token estimate
+
+
+def _content_len(msg) -> int:
+    """Character length of a message's text content, tolerating list/multimodal
+    content (only text parts count)."""
+    content = getattr(msg, "content", "")
+    if isinstance(content, str):
+        return len(content)
+    if isinstance(content, list):
+        total = 0
+        for part in content:
+            if isinstance(part, str):
+                total += len(part)
+            elif isinstance(part, dict):
+                total += len(str(part.get("text", "")))
+        return total
+    return len(str(content))
+
+
+def estimate_tokens(messages, summary: str = "") -> int:
+    """Rough token estimate (chars / CHARS_PER_TOKEN) used as a FALLBACK when the
+    analyzer's usage_metadata is missing or zero. Without it `input_tokens` could
+    be 0 and this node would silently never run, letting history grow until an
+    LLM call fails on context length. Undershoots the real count slightly (it
+    omits the analyzer's system prompt), which is fine for a safety net."""
+    chars = sum(_content_len(m) for m in messages) + len(summary or "")
+    return chars // CHARS_PER_TOKEN
 
 
 def truncate_text(text: str):
@@ -66,12 +94,29 @@ def find_keep_from_index(messages, KEEP_LAST_N_IN_SUMMARIZATION: int) -> int:
                 fallback_index = i
             if safe_count >= KEEP_LAST_N_IN_SUMMARIZATION:
                 return i
-            
+
     return fallback_index
 
 
+def adjust_to_human_start(messages, keep_from_index: int) -> int:
+    """Move the keep boundary back to the nearest HumanMessage so the RETAINED
+    window starts on a user turn. Otherwise summarization can leave the history
+    beginning with an AIMessage (its prompting Human turn got summarized away),
+    which reads oddly and some providers reject a leading assistant message.
+    Falls back to the original index if no earlier Human message exists."""
+    for i in range(min(keep_from_index, len(messages) - 1), -1, -1):
+        if isinstance(messages[i], HumanMessage):
+            return i
+    return keep_from_index
+
+
 async def context_management_node(state: AgentState) -> AgentState:
-    input_tokens = state["input_tokens"]
+    # Prefer the analyzer's reported usage; fall back to a chars/4 estimate when
+    # it's missing or zero (some providers don't return usage_metadata) so this
+    # node never silently no-ops and lets history grow unbounded.
+    input_tokens = state.get("input_tokens", 0) or estimate_tokens(
+        state["messages"], state.get("summary", "")
+    )
     truncation_count = state.get("truncation_count", 0)
     current_truncate_limit = get_current_truncation_limit(truncation_count)
     summarization_count = state.get("summarization_count", 0)
@@ -85,6 +130,9 @@ async def context_management_node(state: AgentState) -> AgentState:
         existing_summary = state.get("summary", "")
 
         keep_from_index = find_keep_from_index(messages, KEEP_LAST_N_IN_SUMMARIZATION)
+        # Ensure the retained window starts on a HumanMessage (a leading AI reply
+        # whose user turn was summarized away reads oddly / some providers reject).
+        keep_from_index = adjust_to_human_start(messages, keep_from_index)
         msgs_to_summarize = messages[:keep_from_index]
 
         if not msgs_to_summarize:
