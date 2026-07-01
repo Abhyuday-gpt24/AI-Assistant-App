@@ -12,7 +12,7 @@ pool → Cohere rerank), against a curated query set, and reports three metrics:
 
 It imports only `vector_store` + `reranker` (+ `config`) — no FastAPI/graph/DB.
 
-Prereq — ingest the corpus as company KB first:
+Prereq — ingest the Next.js docs corpus first:
     python -m src.app.rag_pipeline.data_ingestion.offline_batch_ingestion \\
         --dir path/to/next.js/docs --topic nextjs
 
@@ -31,8 +31,8 @@ DATASETS = {"nextjs": NEXTJS_EVAL}
 
 
 def _scoped_retriever(topic: str | None):
-    """Similarity retriever over the company KB, optionally narrowed to one topic
-    so the eval is isolated to that corpus."""
+    """Similarity retriever over the Next.js-docs KB, optionally narrowed to one
+    topic so the eval is isolated to that corpus."""
     flt = {"source": "company"}
     if topic:
         flt = {"source": "company", "topic": topic}
@@ -86,7 +86,7 @@ def evaluate(dataset: list, topic: str | None, use_rerank: bool, top_k: int,
     empty_queries = 0
 
     print(f"\n=== Retrieval evaluation "
-          f"(topic={topic or 'ALL company'}, rerank={'on' if use_rerank else 'off'}, "
+          f"(topic={topic or 'ALL nextjs_docs'}, rerank={'on' if use_rerank else 'off'}, "
           f"top_k={top_k}, candidates={RERANK_CANDIDATES}) ===\n")
 
     for i, item in enumerate(dataset, start=1):
@@ -126,7 +126,7 @@ def main():
     parser.add_argument("--dataset", default="nextjs", choices=sorted(DATASETS),
                         help="Which curated query set to run")
     parser.add_argument("--topic", default="nextjs",
-                        help="Company-KB topic to scope retrieval to (use '' for all)")
+                        help="Next.js-docs KB topic to scope retrieval to (use '' for all)")
     parser.add_argument("--top-k", type=int, default=10,
                         help="How many ranked docs to evaluate per query")
     parser.add_argument("--no-rerank", action="store_true",

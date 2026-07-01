@@ -166,12 +166,23 @@ async def chat_stream(
             ))
     await db.commit()
 
+    # Does this chat hold any uploaded DOCUMENTS (this turn or earlier)? Drives the
+    # analyzer's routing nudge so a follow-up question about the file (no re-attach)
+    # still retrieves it. Reads the ChatAttachment rows just committed above.
+    docs_present = await db.execute(
+        select(ChatAttachment.id)
+        .where(ChatAttachment.chat_id == chat_id,
+               ChatAttachment.category == CATEGORY_DOCS)
+        .limit(1)
+    )
+    has_user_docs = docs_present.first() is not None
+
     # Stream and collect full response
     async def generate():
         yield f"data: {json.dumps({'chat_id': chat_id})}\n\n"
         full_response = ""
         async for chunk in stream_chat(req.message, chat_id, verified_attachments,
-                                       user.id):
+                                       user.id, has_user_docs):
             full_response += json.loads(chunk[6:]).get("delta", "") if "delta" in chunk else ""
             yield chunk
 

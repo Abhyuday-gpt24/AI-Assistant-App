@@ -1,11 +1,11 @@
 from src.app.graphs.graph_state import AgentState
 
-# intent → node. user_docs / company_kb / web_search may run in parallel (each
+# intent → node. user_docs / nextjs_docs / web_search may run in parallel (each
 # writes its own state key); "direct" goes straight to the synthesizer.
 _INTENT_TO_NODE = {
     "direct": "synthesizer_agent_node",
     "user_docs": "user_docs_retrieval_node",
-    "company_kb": "company_kb_retrieval_node",
+    "nextjs_docs": "nextjs_docs_retrieval_node",
     "web_search": "web_search_node",
 }
 

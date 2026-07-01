@@ -7,6 +7,7 @@ from src.app.models.models import (
     gemini_flash_model,
 )
 from src.app.sys_prompts.asistant_sys_prompt import QUERY_ANALYZER_SYS_PROMPT, SYNTHESIZER_AGENT_SYS_PROMPT
+from src.app.rag_pipeline.attachment_selector import select_relevant_doc_text
 from langchain_core.messages import SystemMessage, HumanMessage
 from pydantic import BaseModel, Field
 from typing import Literal
@@ -34,8 +35,8 @@ VISION_MODEL = gemini_flash_model.with_fallbacks([gpt_5_mini_model])
 
 # Define the structure
 class QueryAnalyzerInterface(BaseModel):
-    intent: list[Literal["direct", "user_docs", "company_kb", "web_search"]] = Field(
-        description='List of intents. "direct" = answer alone (used ALONE). "user_docs" = the user\'s OWN uploaded files in this chat. "company_kb" = the shared company knowledge base (policies/T&C/handbook/etc.). "web_search" = live internet info. user_docs / company_kb / web_search MAY be combined (e.g. ["user_docs","company_kb"] to compare the user\'s file against company policy); "direct" is never combined.'
+    intent: list[Literal["direct", "user_docs", "nextjs_docs", "web_search"]] = Field(
+        description='List of intents. "direct" = answer alone (used ALONE). "user_docs" = the user\'s OWN uploaded files in this chat. "nextjs_docs" = the curated Next.js documentation knowledge base (App Router, routing, server/client components, data fetching, config, etc.). "web_search" = live internet info. user_docs / nextjs_docs / web_search MAY be combined (e.g. ["user_docs","nextjs_docs"] to check the user\'s file against the Next.js docs); "direct" is never combined.'
     )
     rewritten_query: str = Field(
         description="Search-optimized rewrite of user query. For 'direct' intent, keep original as-is."
@@ -67,6 +68,19 @@ def current_time()-> datetime:
 async def query_analyzer_node(state: AgentState) -> AgentState:
     summary = state.get("summary", "")
     system_prompt = QUERY_ANALYZER_SYS_PROMPT
+    # When the chat already holds uploaded documents, nudge the router to consider
+    # the user's OWN files for content questions. The analyzer only sees clean
+    # text and can't otherwise tell a file was uploaded on an earlier turn, so a
+    # follow-up like "what does section 12 say?" would fall to "direct" and miss
+    # the doc. Retrieval is cheap and returns nothing if nothing matches.
+    if state.get("has_user_docs"):
+        system_prompt += (
+            "\n\nCONTEXT: The user has uploaded one or more documents to THIS chat. "
+            "If the latest message could be about document content — a section/page/"
+            "chapter/table, \"the document/file/report\", \"what does it say\", a summary, "
+            "or anything that might live in an uploaded file — INCLUDE \"user_docs\" in "
+            "the intent (combined with other intents as needed)."
+        )
     if summary:
         system_prompt += f"\n\nPrevious conversation summary:\n{summary} \n\n Current date and time : {current_time()}"
     response = await query_analyzer_structured.ainvoke([SystemMessage(system_prompt), *state["messages"]])
@@ -75,13 +89,25 @@ async def query_analyzer_node(state: AgentState) -> AgentState:
 
     token_count = response["raw"].usage_metadata.get("total_tokens", 0) if hasattr(response["raw"], "usage_metadata") else 0
 
+    # Deterministic guarantee: if a DOCUMENT was attached on THIS turn, user_docs
+    # retrieval must run no matter how the analyzer routed — otherwise a doc
+    # question could fall to "direct" and ignore the file. (Same-turn the file may
+    # not be indexed yet; the synthesizer's query-aware inline covers that.)
+    intents = list(result.intent or [])
+    has_attached_doc = any(a.get("doc_markdown") for a in (state.get("attachments") or []))
+    if has_attached_doc:
+        intents = [i for i in intents if i != "direct"]
+        if "user_docs" not in intents:
+            intents.append("user_docs")
+    if not intents:
+        intents = ["direct"]
 
     return {
-        "intent": result.intent,
+        "intent": intents,
         "rewritten_query": result.rewritten_query,
         "category": result.category,
         "user_docs_result": "",
-        "company_kb_result": "",
+        "nextjs_docs_result": "",
         "web_search_result": "",
         "input_tokens": token_count
     }
@@ -89,7 +115,7 @@ async def query_analyzer_node(state: AgentState) -> AgentState:
 
 async def synthesizer_agent_node(state: AgentState) -> AgentState:
     user_docs = state.get("user_docs_result", "")
-    company_kb = state.get("company_kb_result", "")
+    nextjs_docs = state.get("nextjs_docs_result", "")
     web = state.get("web_search_result", "")
 
     summary = state.get("summary", "")
@@ -99,24 +125,32 @@ async def synthesizer_agent_node(state: AgentState) -> AgentState:
     # Only append non-empty context sections so the model isn't handed empty headers.
     if user_docs:
         sys_prompt += f"\n\nYour uploaded documents (this chat):\n{user_docs}"
-    if company_kb:
-        sys_prompt += f"\n\nCompany knowledge base:\n{company_kb}"
+    if nextjs_docs:
+        sys_prompt += f"\n\nNext.js documentation:\n{nextjs_docs}"
     if web:
         sys_prompt += f"\n\nWeb search results:\n{web}"
     if summary:
         sys_prompt += f"\n\nPrevious conversation summary:\n{summary}"
 
     # Attached-DOCUMENT text is injected here (synthesizer only) — never reaches
-    # the query-analyzer node. Each doc carries its converted Markdown.
+    # the query-analyzer node. Each doc carries its converted Markdown; for a doc
+    # larger than MAX_DOC_CHARS we inject the parts most RELEVANT to the question
+    # (query-aware selection) instead of just the opening pages, so "ask about the
+    # rest of the document" works even before RAG indexing finishes.
     docs = [a for a in attachments if a.get("doc_markdown")]
     if docs:
-        doc_ctx = "\n\n".join(
-            f"--- Attached document: {d.get('original_name', 'document')} ---\n"
-            f"{d['doc_markdown'][:MAX_DOC_CHARS]}"
-            + ("\n\n[... document truncated ...]" if len(d['doc_markdown']) > MAX_DOC_CHARS else "")
-            for d in docs
-        )
-        sys_prompt += f"\n\nAttached document(s) the user provided this turn:\n{doc_ctx}"
+        query = state.get("rewritten_query") or state.get("query") or ""
+        blocks = []
+        for d in docs:
+            full = d["doc_markdown"]
+            selected = select_relevant_doc_text(full, query, MAX_DOC_CHARS)
+            note = ("" if len(full) <= MAX_DOC_CHARS else
+                    "\n\n[Note: large document — the excerpts above are the parts most relevant to "
+                    "the question; ask about a specific section for more.]")
+            blocks.append(
+                f"--- Attached document: {d.get('original_name', 'document')} ---\n{selected}{note}"
+            )
+        sys_prompt += "\n\nAttached document(s) the user provided this turn:\n" + "\n\n".join(blocks)
 
     sys_prompt += f"\n\n Current date and time : {current_time()}"
 

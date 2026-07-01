@@ -28,7 +28,8 @@ async def delete_chat_thread(thread_id: str) -> None:
 
 async def stream_chat(message: str, thread_id: str,
                       attachments: list[dict] | None = None,
-                      user_id: str | None = None):
+                      user_id: str | None = None,
+                      has_user_docs: bool = False):
     config = {"configurable": {"thread_id": thread_id}}
     # The user turn stays CLEAN (text only) so the query-analyzer node sees just
     # the request, never the attached file. Attachments ride in their own state
@@ -38,8 +39,9 @@ async def stream_chat(message: str, thread_id: str,
     input_data = {
         "messages": [HumanMessage(content=message)],
         "attachments": attachments or [],
+        "has_user_docs": has_user_docs,
         "user_docs_result": "",
-        "company_kb_result": "",
+        "nextjs_docs_result": "",
         "web_search_result": "",
         "intent": "",
         "query": message,

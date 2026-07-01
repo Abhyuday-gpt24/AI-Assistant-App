@@ -1,13 +1,13 @@
-"""Offline COMPANY-KB ingest worker — convert → chunk, fanned out across processes.
+"""Offline NEXT.JS-DOCS ingest worker — convert → chunk, fanned out across processes.
 
-This is the local/bulk pipeline for loading **company reference documents** into
+This is the local/bulk pipeline for loading the **Next.js documentation** into
 the shared corpus (NOT per-user/per-chat uploads — that's the live
 `ingestion_service`). It reads each local file and, **in memory only (no S3)**:
 
     read bytes → convert_to_markdown → chunk_markdown
 
-Company docs are vectors-only, so there are no S3 writes and any vision-extracted
-image placeholders are dropped (no bucket to host them). It runs inside a
+Docs are vectors-only, so there are no S3 writes and any vision-extracted image
+placeholders are dropped (no bucket to host them). It runs inside a
 `ProcessPoolExecutor` so a large local corpus converts in parallel (conversion —
 PDF/office/vision — is the heavy, CPU-bound step). The actual text splitting is
 delegated to `markdown_chunker.chunk_markdown`, the single source of truth shared
@@ -59,7 +59,7 @@ def content_type_for(path) -> str | None:
 
 
 def _source_name(path: str, rel_root: str | None) -> str:
-    """How a company doc is identified in chunk metadata (`filename`). Prefer the
+    """How a docs file is identified in chunk metadata (`filename`). Prefer the
     path RELATIVE to the ingest root (so nested `index.mdx` files stay
     distinguishable and citations are meaningful), falling back to the basename."""
     if not rel_root:
@@ -71,8 +71,8 @@ def _source_name(path: str, rel_root: str | None) -> str:
 
 
 def ingest_file(path: str, rel_root: str | None = None) -> list[dict]:
-    """Convert one local company document IN MEMORY and return its chunk dicts
-    (the parent embeds them, tagged with the run's topic). No S3: company docs are
+    """Convert one local docs file IN MEMORY and return its chunk dicts
+    (the parent embeds them, tagged with the run's topic). No S3: docs are
     vectors-only, so vision-extracted image placeholders are dropped (no bucket to
     host them) and `storage_path` stays empty. Each chunk's `source` is the file's
     path relative to `rel_root` (the ingest dir), so docs stay identifiable.
@@ -112,10 +112,10 @@ def ingest_file(path: str, rel_root: str | None = None) -> list[dict]:
         if not markdown.strip():
             return []
 
-        # 4) chunk (storage_path empty — company docs aren't stored in S3).
+        # 4) chunk (storage_path empty — docs aren't stored in S3).
         return chunk_markdown(markdown, source=source_name, storage_path="")
     except Exception:
-        logger.exception("Offline company ingest failed for %s", path)
+        logger.exception("Offline docs ingest failed for %s", path)
         return []
 
 

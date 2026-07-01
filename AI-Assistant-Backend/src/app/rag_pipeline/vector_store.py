@@ -38,11 +38,12 @@ def _slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", (text or "").lower()).strip("-") or "topic"
 
 
-def company_vector_id(topic: str, chunk_id: str) -> str:
-    """The Pinecone vector id for a company-KB chunk: 'company#{topic}#{chunk_id}'.
-    The 'company#' prefix separates the shared corpus from per-chat vectors; the
-    topic slug allows future per-topic listing/deletion."""
-    return f"company#{_slug(topic)}#{chunk_id}"
+def nextjs_docs_vector_id(topic: str, chunk_id: str) -> str:
+    """The Pinecone vector id for a Next.js-docs KB chunk:
+    'nextjs#{topic}#{chunk_id}'. The 'nextjs#' prefix separates the shared docs
+    corpus from per-chat vectors; the topic slug allows future per-topic
+    listing/deletion."""
+    return f"nextjs#{_slug(topic)}#{chunk_id}"
 
 
 def get_vector_store():
@@ -107,12 +108,12 @@ def get_user_docs_retriever(chat_id: str, k=RERANK_CANDIDATES):
     return _build_retriever({"chat_id": chat_id}, f"user:{chat_id}", k)
 
 
-def get_company_retriever(k=RERANK_CANDIDATES):
-    """Retriever over the shared company KB (`{"source": "company"}`) — the same
-    reference corpus (policies, T&C, handbooks, …) for every chat. The analyzer
-    routes here for questions about company policy/rules. Returns the pre-rerank
+def get_nextjs_docs_retriever(k=RERANK_CANDIDATES):
+    """Retriever over the curated Next.js documentation KB
+    (`{"source": "company", "topic": "nextjs"}`) — the same docs corpus for every chat. The
+    analyzer routes here for questions about Next.js. Returns the pre-rerank
     candidate pool."""
-    return _build_retriever({"source": "company"}, "company", k)
+    return _build_retriever({"source": "company", "topic": "nextjs"}, "nextjs", k)
 
 
 def _chat_vector_ids(index, chat_id: str) -> list[str]:

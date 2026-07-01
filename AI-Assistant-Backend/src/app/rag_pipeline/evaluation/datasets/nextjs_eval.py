@@ -1,6 +1,6 @@
 """Curated retrieval-eval set for the Next.js documentation.
 
-Ingest the docs as company KB first (one topic, e.g. `nextjs`):
+Ingest the Next.js docs first (one topic, e.g. `nextjs`):
 
     # grab the docs folder from https://github.com/vercel/next.js/tree/canary/docs
     python -m src.app.rag_pipeline.data_ingestion.offline_batch_ingestion \\

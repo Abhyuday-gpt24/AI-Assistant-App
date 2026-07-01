@@ -8,7 +8,7 @@ class AgentState(TypedDict):
     intent: list
     category: str   # query type (math/code/general) → picks the synthesizer model tier
     user_docs_result: str    # hits from THIS chat's own uploads (intent user_docs)
-    company_kb_result: str   # hits from the shared company KB (intent company_kb)
+    nextjs_docs_result: str  # hits from the Next.js docs KB (intent nextjs_docs)
     web_search_result: str
     input_tokens: int
     truncation_count:int
@@ -17,6 +17,7 @@ class AgentState(TypedDict):
     chat_id: str   # the conversation id (== thread_id); ALSO the RAG scope — it's
                    # the metadata filter retrieval uses inside the tenant namespace
     attachments: list   # files attached this turn — consumed ONLY by the synthesizer node
+    has_user_docs: bool # this chat has uploaded docs (this turn or earlier) → analyzer routing nudge
 
 
     

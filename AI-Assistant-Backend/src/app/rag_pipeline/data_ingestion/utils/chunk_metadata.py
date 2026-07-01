@@ -17,12 +17,14 @@ def _document_type(filename: str) -> str:
     return filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
 
 
-def build_company_chunk_documents(chunks, *, topic, source="company"):
-    """Company-KB chunks: tagged by `topic` + `source="company"`, and DELIBERATELY
-    NOT by user_id/chat_id. Retrieval surfaces them to every chat via a
-    `{"source": "company"}` filter (see vector_store.get_company_retriever), so the
-    company corpus is shared background knowledge, while `topic` (e.g. "terms and
-    conditions", "policies") attributes each doc. No storage_path (vectors only).
+def build_nextjs_docs_chunk_documents(chunks, *, topic, source="company"):
+    """Next.js-docs KB chunks: tagged by `topic` + `source="company"`, and
+    DELIBERATELY NOT by user_id/chat_id. Retrieval surfaces them to every chat via
+    a `{"source": "company", "topic": "nextjs"}` filter (see
+    vector_store.get_nextjs_docs_retriever), so the docs corpus is shared background
+    knowledge, while `topic` (e.g. "nextjs") attributes each doc. No storage_path
+    (vectors only). NOTE: `source="company"` matches the already-ingested corpus —
+    keep it in lockstep with the retriever's filter in vector_store.py.
     """
     created_at = now_utc().date().isoformat()
 
