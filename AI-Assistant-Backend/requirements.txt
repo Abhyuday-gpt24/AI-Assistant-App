@@ -4,7 +4,6 @@ langchain-core
 langchain-community
 langchain-openai
 langchain-deepseek
-langchain-google-genai
 langchain-groq
 langchain-openrouter
 ipykernel

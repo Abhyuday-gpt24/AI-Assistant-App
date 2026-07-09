@@ -1,7 +1,6 @@
 from langchain_openai import ChatOpenAI
 from langchain_deepseek import  ChatDeepSeek
 from langchain_groq import ChatGroq
-from langchain_google_genai import ChatGoogleGenerativeAI
 from config import settings
 
 
@@ -42,8 +41,8 @@ gpt_5_nano_model = ChatOpenAI(
     api_key=settings.OPENAI_API_KEY
 )
 
-# OpenAI GPT-5 Mini — reliable structured output; query-analyzer primary +
-# vision-synthesizer fallback.
+# OpenAI GPT-5 Mini — reliable structured output; vision-capable. Query-analyzer
+# primary + image-synthesizer model.
 gpt_5_mini_model = ChatOpenAI(
     model="gpt-5-mini",
     temperature=0,
@@ -51,18 +50,11 @@ gpt_5_mini_model = ChatOpenAI(
     api_key=settings.OPENAI_API_KEY
 )
 
-# OpenAI GPT-5 — strong general model; provider-error fallback for math/code.
+# OpenAI GPT-5 — strong general model; provider-error fallback for math/code,
+# the analyzer, and the vision synthesizer.
 gpt_5_model = ChatOpenAI(
     model="gpt-5",
     temperature=0,
     reasoning_effort="low",
     api_key=settings.OPENAI_API_KEY
-)
-
-# Gemini 2.5 Flash — vision-capable; image-synthesizer primary + query-analyzer
-# structured-output fallback.
-gemini_flash_model = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash",
-    api_key=settings.GEMINI_API_KEY,
-    temperature=0,
 )

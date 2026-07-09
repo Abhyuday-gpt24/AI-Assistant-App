@@ -1,8 +1,8 @@
-"""Scanned/complex PDF → Markdown via a vision LLM (Gemini).
+"""Scanned/complex PDF → Markdown via a vision LLM (OpenAI gpt-5-nano).
 
-Each page is rendered to a PNG and sent to Gemini, which transcribes it to
-Markdown. Embedded raster images are also extracted so the ingestion layer can
-upload them to S3 and inject their URLs back into the Markdown (and thus into
+Each page is rendered to a PNG and sent to the vision model, which transcribes
+it to Markdown. Embedded raster images are also extracted so the ingestion layer
+can upload them to S3 and inject their URLs back into the Markdown (and thus into
 the chunk metadata). The image bytes are returned here; uploading is the
 service layer's job so this module stays free of any S3/AWS dependency.
 
@@ -35,14 +35,18 @@ IMAGE_DESCRIBE_PROMPT = (
 )
 
 
-def _gemini():
-    from langchain_google_genai import ChatGoogleGenerativeAI
+def _vision_model():
+    from langchain_openai import ChatOpenAI
     from config import settings
 
-    return ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
-        api_key=settings.GEMINI_API_KEY,
+    # gpt-5-nano: cheap, vision-capable OCR model. max_tokens is generous so a
+    # dense page's Markdown (plus the model's reasoning tokens) isn't truncated.
+    return ChatOpenAI(
+        model="gpt-5-nano",
+        api_key=settings.OPENAI_API_KEY,
         temperature=0,
+        reasoning_effort="low",
+        max_tokens=8000,
     )
 
 
@@ -64,7 +68,7 @@ def describe_image(data: bytes, content_type: str = "image/png") -> str:
             {"type": "image_url",
              "image_url": {"url": f"data:{content_type};base64,{b64}"}},
         ])
-        return (_gemini().invoke([message]).content or "").strip()
+        return (_vision_model().invoke([message]).content or "").strip()
     except Exception:
         return ""
 
@@ -82,7 +86,7 @@ def convert_pdf_with_vision(data: bytes, filename: str) -> tuple[str, list[dict]
         import fitz as pymupdf
     from langchain_core.messages import HumanMessage
 
-    model = _gemini()
+    model = _vision_model()
     parts: list[str] = []
     images: list[dict] = []
 

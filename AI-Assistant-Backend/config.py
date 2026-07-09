@@ -13,7 +13,6 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str
     GROQ_API_KEY: str
     DEEPSEEK_API_KEY: str
-    GEMINI_API_KEY: str
 
     # Cohere — used for retrieval re-ranking (rerank-v3.5)
     COHERE_API_KEY: str
@@ -55,6 +54,9 @@ class Settings(BaseSettings):
 
     class Config:
         env_file = ".env"
+        # Ignore unknown keys in .env (e.g. a leftover GEMINI_API_KEY after
+        # Gemini was removed) so a stale entry doesn't fail startup.
+        extra = "ignore"
 
 settings = Settings()
 
